@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { AppMode, ProjectionSource, ContentType } from '../types';
 import { generateTexture } from '../services/gemini';
-import { Upload, Monitor, Square, Layers, Sparkles, Move, Maximize, Image as ImageIcon, Save, FolderOpen, ExternalLink } from 'lucide-react';
+import { Upload, Monitor, Square, Layers, Sparkles, Move, Maximize, Image as ImageIcon, Save, FolderOpen, ExternalLink, Eye, EyeOff, Move3d } from 'lucide-react';
 
 interface ControlPanelProps {
   mode: AppMode;
@@ -15,6 +15,12 @@ interface ControlPanelProps {
   onSave: () => void;
   onLoad: () => void;
   onOpenLive: () => void;
+
+  // New props for background control
+  showBackgroundInLive: boolean;
+  setShowBackgroundInLive: (val: boolean) => void;
+  isEditingBackground: boolean;
+  setIsEditingBackground: (val: boolean) => void;
 }
 
 const ControlPanel: React.FC<ControlPanelProps> = ({
@@ -28,7 +34,11 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   setOpacity,
   onSave,
   onLoad,
-  onOpenLive
+  onOpenLive,
+  showBackgroundInLive,
+  setShowBackgroundInLive,
+  isEditingBackground,
+  setIsEditingBackground
 }) => {
   const [texturePrompt, setTexturePrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -124,7 +134,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
             <Monitor size={16} /> Surface Setup
           </h2>
           <p className="text-xs text-slate-400">
-            Upload a photo of your projection surface (wall/object) to use as a reference guide.
+            Upload a photo of your projection surface to use as a reference.
           </p>
           
           <div className="border-2 border-dashed border-slate-700 rounded-lg p-6 flex flex-col items-center justify-center text-center hover:border-cyan-500 hover:bg-slate-800/50 transition-colors cursor-pointer relative">
@@ -139,7 +149,33 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
           </div>
 
           {backgroundUrl && (
-             <button onClick={toggleFullscreen} className="w-full py-2 bg-slate-800 hover:bg-slate-700 rounded text-sm text-cyan-400 font-medium">
+             <div className="space-y-2">
+                {/* Background Adjustment Toggle */}
+                <button
+                    onClick={() => setIsEditingBackground(!isEditingBackground)}
+                    className={`w-full py-2 rounded text-xs font-medium flex items-center justify-center gap-2 transition-colors ${
+                        isEditingBackground ? 'bg-cyan-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                    }`}
+                >
+                    <Move3d size={14} />
+                    {isEditingBackground ? 'Done Adjusting Position' : 'Adjust Photo Position'}
+                </button>
+
+                {/* Live Visibility Toggle */}
+                <button
+                    onClick={() => setShowBackgroundInLive(!showBackgroundInLive)}
+                    className={`w-full py-2 rounded text-xs font-medium flex items-center justify-center gap-2 transition-colors ${
+                        showBackgroundInLive ? 'bg-green-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                    }`}
+                >
+                    {showBackgroundInLive ? <Eye size={14} /> : <EyeOff size={14} />}
+                    {showBackgroundInLive ? 'Visible on Live Display' : 'Hidden on Live Display'}
+                </button>
+             </div>
+          )}
+
+          {backgroundUrl && (
+             <button onClick={toggleFullscreen} className="w-full py-2 mt-4 bg-slate-800 hover:bg-slate-700 rounded text-sm text-cyan-400 font-medium">
                 Enter Fullscreen Projection
              </button>
           )}
@@ -221,8 +257,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         <p className="font-semibold mb-1">Quick Guide:</p>
         <ul className="list-disc pl-4 space-y-1">
           <li>Start in <strong>Setup</strong> to upload a photo of the target object.</li>
-          <li>Switch to <strong>Map</strong> to drag the 4 corners to align projection.</li>
-          <li>Use <strong>AI Texture</strong> to create custom mapping skins.</li>
+          <li>Adjust Background position if needed.</li>
+          <li>Switch to <strong>Map</strong> to drag points to align projection.</li>
           <li>Go <strong>Live</strong> and maximize window on projector.</li>
         </ul>
       </div>

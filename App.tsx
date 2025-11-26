@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import ControlPanel from './components/ControlPanel';
 import SurfaceCanvas from './components/SurfaceCanvas';
-import { AppMode, ControlPoint, ProjectionSource, ContentType } from './types';
+import { AppMode, ControlPoint, ProjectionSource, ContentType, Transform } from './types';
 
 // Constants
 const CHANNEL_NAME = 'lumamap_sync_v1';
@@ -12,6 +12,13 @@ const App: React.FC = () => {
 
   const [mode, setMode] = useState<AppMode>(isReceiver ? AppMode.LIVE : AppMode.SETUP);
   const [backgroundUrl, setBackgroundUrl] = useState<string | null>(null);
+  const [showBackgroundInLive, setShowBackgroundInLive] = useState(false);
+  
+  // Independent transform for the background image
+  const [backgroundTransform, setBackgroundTransform] = useState<Transform>({ x: 0, y: 0, k: 1 });
+  // UI state to toggle between moving the camera or moving the background image
+  const [isEditingBackground, setIsEditingBackground] = useState(false);
+
   const [source, setSource] = useState<ProjectionSource>({
     type: ContentType.SOLID_COLOR,
     url: '',
@@ -43,10 +50,9 @@ const App: React.FC = () => {
       if (isReceiver) {
         // RECEIVER LOGIC
         if (type === 'SYNC') {
-            const { points: normPoints, source: newSource, opacity: newOpacity, refSize } = payload;
+            const { points: normPoints, source: newSource, opacity: newOpacity, refSize, bgUrl, bgTransform, showBg } = payload;
             
             // Restore Source
-            // If the source has a File, we need to create a URL for it locally
             if (newSource && newSource.file && newSource.file instanceof File) {
                const newUrl = URL.createObjectURL(newSource.file);
                setSource({ ...newSource, url: newUrl });
@@ -56,6 +62,11 @@ const App: React.FC = () => {
 
             // Restore Opacity
             if (newOpacity !== undefined) setOpacity(newOpacity);
+
+            // Restore Background
+            if (bgUrl !== undefined) setBackgroundUrl(bgUrl);
+            if (bgTransform !== undefined) setBackgroundTransform(bgTransform);
+            if (showBg !== undefined) setShowBackgroundInLive(showBg);
 
             // Restore Points (Denormalize)
             if (normPoints && refSize) {
@@ -108,23 +119,22 @@ const App: React.FC = () => {
              points: normPoints,
              source,
              opacity,
-             refSize: { w, h }
+             refSize: { w, h },
+             bgUrl: backgroundUrl,
+             bgTransform: backgroundTransform,
+             showBg: showBackgroundInLive
          }
      });
-  }, [points, source, opacity, isReceiver]);
+  }, [points, source, opacity, isReceiver, backgroundUrl, backgroundTransform, showBackgroundInLive]);
 
-  // Trigger sync on state changes (Debounced slightly ideally, but direct for now)
+  // Trigger sync on state changes
   useEffect(() => {
       if (!isReceiver) {
           broadcastState();
       }
-  }, [points, source, opacity, broadcastState, isReceiver]);
+  }, [points, source, opacity, broadcastState, isReceiver, backgroundUrl, backgroundTransform, showBackgroundInLive]);
 
   // Re-scale points on receiver when window resizes
-  // Note: This is a bit tricky because we don't store the "normalized" state permanently.
-  // Ideally, the Controller keeps sending syncs, or we store normalized state.
-  // For now, if user resizes receiver, they might need to trigger a sync (e.g. move a point in controller).
-  // Improvement: Request sync on resize.
   useEffect(() => {
      if (!isReceiver) return;
      const handleResize = () => {
@@ -164,6 +174,8 @@ const App: React.FC = () => {
   const handleUploadBackground = (file: File) => {
     const url = URL.createObjectURL(file);
     setBackgroundUrl(url);
+    // Reset background transform when new image loads
+    setBackgroundTransform({ x: 0, y: 0, k: 1 });
   };
 
   const toggleFullscreen = useCallback(() => {
@@ -179,7 +191,6 @@ const App: React.FC = () => {
   };
 
   const handleSave = () => {
-    // Strip File objects before saving to localStorage
     const safeSource = source && source.file ? { ...source, file: undefined, url: '' } : source;
     
     const data = {
@@ -187,12 +198,13 @@ const App: React.FC = () => {
       points,
       opacity,
       source: safeSource && safeSource.url.startsWith('blob:') ? null : safeSource,
-      mode
+      mode,
+      backgroundTransform
     };
 
     try {
       localStorage.setItem('lumaMapProject', JSON.stringify(data));
-      alert("Project saved!\n\nNote: Geometry and AI textures are saved. Local uploaded video/image files cannot be saved and must be re-selected.");
+      alert("Project saved!\n\nNote: Geometry, background position, and AI textures are saved. Local uploaded video/image files cannot be saved and must be re-selected.");
     } catch (e) {
       console.error("Save failed", e);
       alert("Failed to save project. Storage might be full.");
@@ -214,6 +226,9 @@ const App: React.FC = () => {
       if (typeof data.opacity === 'number') {
         setOpacity(data.opacity);
       }
+      if (data.backgroundTransform) {
+        setBackgroundTransform(data.backgroundTransform);
+      }
       if (data.source) {
         setSource(data.source);
       } else {
@@ -233,6 +248,11 @@ const App: React.FC = () => {
     }
   };
 
+  // Determine if background should be visible
+  // In SETUP/MAPPING: Always show if URL exists
+  // In LIVE (or Receiver): Only show if showBackgroundInLive is true
+  const shouldShowBackground = !!backgroundUrl && ((!isReceiver && mode !== AppMode.LIVE) || showBackgroundInLive);
+
   return (
     <div className="w-screen h-screen bg-black overflow-hidden flex">
       {!isReceiver && uiVisible && (
@@ -248,18 +268,27 @@ const App: React.FC = () => {
           onSave={handleSave}
           onLoad={handleLoad}
           onOpenLive={handleOpenLive}
+          
+          showBackgroundInLive={showBackgroundInLive}
+          setShowBackgroundInLive={setShowBackgroundInLive}
+          isEditingBackground={isEditingBackground}
+          setIsEditingBackground={setIsEditingBackground}
         />
       )}
 
       <main className={`flex-1 relative transition-all duration-300 ${(uiVisible && !isReceiver) ? 'ml-80' : 'ml-0'}`}>
         <SurfaceCanvas
           mode={mode}
-          backgroundUrl={backgroundUrl}
+          backgroundUrl={shouldShowBackground ? backgroundUrl : null}
           points={points}
           setPoints={setPoints}
           source={source}
           opacity={opacity}
           onDimensionsChange={(w, h) => { canvasDims.current = { w, h }; }}
+          
+          backgroundTransform={backgroundTransform}
+          onBackgroundTransformChange={!isReceiver ? setBackgroundTransform : undefined}
+          isEditingBackground={!isReceiver && isEditingBackground}
         />
         
         {/* Welcome Screen for Controller */}
@@ -281,7 +310,7 @@ const App: React.FC = () => {
 
         {/* Receiver Overlay hint */}
         {isReceiver && (
-            <div className="absolute top-4 left-4 text-white/20 text-xs pointer-events-none">
+            <div className="absolute top-4 left-4 text-white/20 text-xs pointer-events-none z-[200]">
                 Receiver Mode • Waiting for Controller...
             </div>
         )}

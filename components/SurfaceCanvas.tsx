@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useMemo } from 'react';
-import { ControlPoint, ProjectionSource, ContentType, AppMode } from '../types';
+import { ControlPoint, ProjectionSource, ContentType, AppMode, Transform } from '../types';
 import { triangulate, solveAffine, getBarycentric, pointInTriangle } from '../utils/math';
 import Draggable from 'react-draggable';
 import { ZoomIn, ZoomOut, RefreshCw, Play, Pause, Volume2, VolumeX } from 'lucide-react';
@@ -12,6 +12,11 @@ interface SurfaceCanvasProps {
   source: ProjectionSource | null;
   opacity: number;
   onDimensionsChange?: (width: number, height: number) => void;
+
+  // Background specific props
+  backgroundTransform?: Transform;
+  onBackgroundTransformChange?: (t: Transform) => void;
+  isEditingBackground?: boolean;
 }
 
 const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
@@ -21,7 +26,10 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
   setPoints,
   source,
   opacity,
-  onDimensionsChange
+  onDimensionsChange,
+  backgroundTransform = { x: 0, y: 0, k: 1 },
+  onBackgroundTransformChange,
+  isEditingBackground = false
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -34,14 +42,13 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
   // Grid canvas cache
   const gridCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Pan and Zoom State
+  // Global Pan and Zoom State (Camera)
   const [transform, setTransform] = useState({ x: 0, y: 0, k: 1 });
   const [isPanning, setIsPanning] = useState(false);
   const lastPanRef = useRef({ x: 0, y: 0 });
 
   // Selection and Editing State
   const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(null);
-  // Temporary state to handle typing "0." or out-of-bounds values before blur/commit
   const [editingUV, setEditingUV] = useState<{ index: number, field: 'u'|'v', value: string } | null>(null);
 
   // Video State
@@ -53,8 +60,7 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
       duration: 0
   });
 
-  // Use useMemo instead of useState+useEffect to ensure triangles are always
-  // calculated from the *current* set of points synchronously.
+  // Use useMemo for triangulation
   const triangles = useMemo(() => {
     if (points.length < 3) return [];
     return triangulate(points);
@@ -63,15 +69,16 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
   // Manage stable refs for draggable elements
   const pointRefs = useRef<Map<string, React.RefObject<HTMLDivElement>>>(new Map());
 
-  // Helper to ensure we always get a valid ref for a point ID
-  const getPointRef = (id: string) => {
-    if (!pointRefs.current.has(id)) {
-      pointRefs.current.set(id, React.createRef<HTMLDivElement>());
+  const getPointRef = (id: string): React.RefObject<HTMLDivElement> => {
+    const existing = pointRefs.current.get(id);
+    if (existing) {
+      return existing;
     }
-    return pointRefs.current.get(id);
+    const newRef = React.createRef<HTMLDivElement>();
+    pointRefs.current.set(id, newRef);
+    return newRef;
   };
 
-  // Cleanup old refs
   useEffect(() => {
     const currentIds = new Set(points.map(p => p.id));
     for (const id of pointRefs.current.keys()) {
@@ -88,11 +95,8 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
     video.loop = true;
     video.playsInline = true;
     video.autoplay = true;
-
-    // Default to muted for browser autoplay policies
     video.muted = true; 
 
-    // Sync state helpers
     const onPlay = () => setVideoState(prev => ({ ...prev, isPlaying: true }));
     const onPause = () => setVideoState(prev => ({ ...prev, isPlaying: false }));
     const onTimeUpdate = () => setVideoState(prev => ({ ...prev, currentTime: video.currentTime }));
@@ -188,17 +192,14 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
     const render = () => {
       if (!canvas || !ctx) return;
 
-      // Update resolution
       if (canvas.width !== containerSize.w || canvas.height !== containerSize.h) {
         canvas.width = containerSize.w;
         canvas.height = containerSize.h;
       }
 
-      // Clear
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.globalAlpha = mode === AppMode.MAPPING ? opacity : 1;
 
-      // Draw Grid/Content
       if (!source) {
           ctx.fillStyle = "#000000";
           ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -229,7 +230,6 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
         }
 
         if (texture) {
-            // Create pattern for tiling support
             let pattern: CanvasPattern | null = null;
             try {
                 pattern = ctx.createPattern(texture, 'repeat');
@@ -237,7 +237,6 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
                 // Texture might not be ready
             }
 
-            // Render Triangles
             for (let i = 0; i < triangles.length; i += 3) {
                 const i0 = triangles[i];
                 const i1 = triangles[i + 1];
@@ -249,7 +248,6 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
 
                 if (!p0 || !p1 || !p2) continue;
 
-                // Affine Transform
                 const [a, b, c, d, e, f] = solveAffine(
                     p0.x, p0.y,
                     p1.x, p1.y,
@@ -271,7 +269,6 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
 
                 if (pattern) {
                     ctx.fillStyle = pattern;
-                    // Calculate bounding box in texture space (UV space) to fill
                     const uCoords = [p0.u, p1.u, p2.u];
                     const vCoords = [p0.v, p1.v, p2.v];
                     const minU = Math.min(...uCoords) * texW;
@@ -298,7 +295,7 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
       if (mode === AppMode.MAPPING && points.length >= 3) {
           ctx.globalAlpha = 1;
           ctx.strokeStyle = '#22d3ee';
-          ctx.lineWidth = 1 / transform.k; // Constant width regardless of zoom
+          ctx.lineWidth = 1 / transform.k;
           ctx.beginPath();
           for (let i = 0; i < triangles.length; i += 3) {
              const p0 = points[triangles[i]];
@@ -322,12 +319,27 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
     return () => cancelAnimationFrame(animationFrameId);
   }, [containerSize, points, triangles, source, mode, opacity, transform.k, loadedImage]);
 
-  // --- Zoom & Pan Logic ---
+  // --- Zoom, Pan & Background Interaction ---
 
   const handleWheel = (e: React.WheelEvent) => {
     if (mode === AppMode.LIVE) return;
     
-    // Determine scale direction
+    // Check if we are scaling the background image
+    if (isEditingBackground && onBackgroundTransformChange) {
+        // Scaling Background
+        const scaleFactor = 1.05;
+        const newK = e.deltaY < 0 
+          ? backgroundTransform.k * scaleFactor 
+          : backgroundTransform.k / scaleFactor;
+        
+        onBackgroundTransformChange({
+            ...backgroundTransform,
+            k: Math.max(0.1, Math.min(10, newK))
+        });
+        return;
+    }
+
+    // Scaling View (Camera)
     const scaleFactor = 1.1;
     const newK = e.deltaY < 0 
       ? Math.min(transform.k * scaleFactor, 10) 
@@ -348,7 +360,6 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
   const startPan = (e: React.MouseEvent) => {
     if (mode === AppMode.LIVE) return;
     
-    // Deselect if clicking on empty space
     if (selectedPointIndex !== null) {
         setSelectedPointIndex(null);
     }
@@ -363,11 +374,21 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
     const dx = e.clientX - lastPanRef.current.x;
     const dy = e.clientY - lastPanRef.current.y;
     
-    setTransform(prev => ({
-      ...prev,
-      x: prev.x + dx,
-      y: prev.y + dy
-    }));
+    // If editing background, move the background (scaled inversely by view zoom)
+    if (isEditingBackground && onBackgroundTransformChange) {
+        onBackgroundTransformChange({
+            ...backgroundTransform,
+            x: backgroundTransform.x + dx / transform.k,
+            y: backgroundTransform.y + dy / transform.k
+        });
+    } else {
+        // Otherwise, move the view
+        setTransform(prev => ({
+            ...prev,
+            x: prev.x + dx,
+            y: prev.y + dy
+        }));
+    }
     
     lastPanRef.current = { x: e.clientX, y: e.clientY };
   };
@@ -387,7 +408,7 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
   // --- Point Interaction ---
 
   const handleDoubleClick = (e: React.MouseEvent) => {
-      if (mode !== AppMode.MAPPING) return;
+      if (mode !== AppMode.MAPPING || isEditingBackground) return;
       
       const rect = containerRef.current?.getBoundingClientRect();
       if (!rect) return;
@@ -395,7 +416,6 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
       const rawX = e.clientX - rect.left;
       const rawY = e.clientY - rect.top;
 
-      // Transform into World Coordinates
       const x = (rawX - transform.x) / transform.k;
       const y = (rawY - transform.y) / transform.k;
 
@@ -425,7 +445,6 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
           v = y / containerSize.h;
       }
 
-      // Clamp initial UV
       u = Math.max(0, Math.min(1, u));
       v = Math.max(0, Math.min(1, v));
 
@@ -435,19 +454,18 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
       };
 
       setPoints([...points, newPoint]);
-      setSelectedPointIndex(points.length); // Select the new point
+      setSelectedPointIndex(points.length); 
   };
 
   const handleRemovePoint = (e: React.MouseEvent, index: number) => {
       e.preventDefault();
       e.stopPropagation();
-      if (mode !== AppMode.MAPPING) return;
+      if (mode !== AppMode.MAPPING || isEditingBackground) return;
       if (points.length <= 3) return;
       
       const newPoints = points.filter((_, i) => i !== index);
       setPoints(newPoints);
 
-      // Adjust selection if necessary
       if (selectedPointIndex === index) {
           setSelectedPointIndex(null);
       } else if (selectedPointIndex !== null && selectedPointIndex > index) {
@@ -469,18 +487,14 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
     if (editingUV && editingUV.index === index && editingUV.field === field) {
         return editingUV.value;
     }
-    // Simple formatting to avoid long decimals
     return Math.round(points[index][field] * 1000) / 1000;
   };
 
   const handleUVChange = (index: number, field: 'u' | 'v', rawValue: string) => {
     setEditingUV({ index, field, value: rawValue });
-    
     const val = parseFloat(rawValue);
     if (!isNaN(val)) {
-        // Enforce 0-1 range strictly
         const clamped = Math.max(0, Math.min(1, val));
-        
         const newPoints = [...points];
         if (newPoints[index][field] !== clamped) {
              newPoints[index] = { ...newPoints[index], [field]: clamped };
@@ -529,31 +543,50 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
 
   return (
     <div 
-        className="relative w-full h-full bg-black overflow-hidden flex items-center justify-center select-none"
+        className={`relative w-full h-full bg-black overflow-hidden flex items-center justify-center select-none ${isEditingBackground ? 'cursor-move' : ''}`}
     >
       {/* Background Reference */}
-      {mode !== AppMode.LIVE && backgroundUrl && (
-        <img 
-          src={backgroundUrl} 
-          className="absolute inset-0 w-full h-full object-contain opacity-50 pointer-events-none select-none z-0"
-          alt="reference surface"
-          style={{
-             transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.k})`,
-             transformOrigin: '0 0'
-          }}
-        />
-      )}
+      {/* 
+         Logic:
+         1. Container wraps Image to provide Global Pan/Zoom (Camera View).
+         2. Image has independent transform (Local Position).
+      */}
+      <div 
+        className="absolute inset-0 pointer-events-none overflow-hidden"
+        style={{
+            transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.k})`,
+            transformOrigin: '0 0'
+        }}
+      >
+        {backgroundUrl && (
+            <div
+                style={{
+                    transform: `translate(${backgroundTransform.x}px, ${backgroundTransform.y}px) scale(${backgroundTransform.k})`,
+                    transformOrigin: '0 0',
+                    width: '100%',
+                    height: '100%'
+                }}
+            >
+                <img 
+                src={backgroundUrl} 
+                className="w-full h-full object-contain opacity-50 select-none pointer-events-none"
+                alt="reference surface"
+                />
+            </div>
+        )}
+      </div>
 
       {/* Main Container */}
       <div 
         ref={containerRef}
-        className="relative w-full h-full max-w-5xl max-h-[80vh] mx-auto z-10 overflow-hidden cursor-move ring-1 ring-white/10"
+        className={`relative w-full h-full max-w-5xl max-h-[80vh] mx-auto z-10 overflow-hidden ring-1 ring-white/10 ${isEditingBackground ? 'ring-yellow-500/50' : ''}`}
         onWheel={handleWheel}
         onMouseDown={startPan}
         onMouseMove={updatePan}
         onMouseUp={endPan}
         onMouseLeave={endPan}
         onDoubleClick={handleDoubleClick}
+        style={{ cursor: isEditingBackground ? 'move' : 'default' }}
       >
         <div
           className="absolute top-0 left-0 w-full h-full origin-top-left will-change-transform"
@@ -567,7 +600,7 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
           />
 
           {/* Draggable Handles */}
-          {mode === AppMode.MAPPING && points.map((p, idx) => {
+          {!isEditingBackground && mode === AppMode.MAPPING && points.map((p, idx) => {
               const nodeRef = getPointRef(p.id);
               return (
               <Draggable
@@ -592,7 +625,7 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
                           <div className={`w-1 h-1 ${selectedPointIndex === idx ? 'bg-yellow-400' : 'bg-white'} rounded-full`} />
                       </div>
 
-                      {/* UV Editor (Only active point) */}
+                      {/* UV Editor */}
                       {selectedPointIndex === idx && (
                           <div 
                             className="absolute top-5 left-5 bg-slate-900/95 border border-slate-600 rounded p-2 flex flex-col gap-1 shadow-2xl min-w-[80px]"
@@ -631,8 +664,15 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
           })}
         </div>
 
+        {/* HUD: Editing Background Indicator */}
+        {isEditingBackground && (
+             <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-yellow-600/90 text-white px-4 py-1 rounded-full text-xs font-bold pointer-events-none shadow-lg z-[100]">
+                EDITING BACKGROUND POSITION
+             </div>
+        )}
+
         {/* HUD: Zoom Controls */}
-        {mode === AppMode.MAPPING && (
+        {mode === AppMode.MAPPING && !isEditingBackground && (
           <div 
              className="absolute bottom-4 left-4 flex flex-col gap-2 z-[100]"
              onMouseDown={(e) => e.stopPropagation()} 
@@ -656,7 +696,7 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
         )}
 
         {/* HUD: Video Controls */}
-        {mode === AppMode.MAPPING && source?.type === ContentType.VIDEO && (
+        {mode === AppMode.MAPPING && source?.type === ContentType.VIDEO && !isEditingBackground && (
             <div 
                 className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-slate-900/90 backdrop-blur border border-slate-700 rounded-lg p-2 flex items-center gap-3 shadow-2xl z-[100] min-w-[300px]"
                 onMouseDown={(e) => e.stopPropagation()}

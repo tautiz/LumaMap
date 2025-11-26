@@ -24,6 +24,12 @@ export interface ProjectionSource {
   file?: File; // Raw file object for syncing across tabs
 }
 
+export interface Transform {
+  x: number;
+  y: number;
+  k: number;
+}
+
 export interface ProjectorState {
   points: ControlPoint[];
   opacity: number;
