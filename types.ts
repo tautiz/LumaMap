@@ -31,6 +31,14 @@ export interface Transform {
   k: number;
 }
 
+export interface PlaybackState {
+  isPlaying: boolean;
+  volume: number;
+  isMuted: boolean;
+  currentTime: number;
+  duration: number;
+}
+
 export interface Layer {
   id: string;
   name: string;
@@ -39,6 +47,7 @@ export interface Layer {
   opacity: number;
   source: ProjectionSource | null;
   points: ControlPoint[];
+  playback: PlaybackState;
 }
 
 export interface ProjectorState {

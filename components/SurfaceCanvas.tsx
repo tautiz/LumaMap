@@ -41,6 +41,7 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
   
   // Resource Cache
   const [imageCache] = useState<Map<string, HTMLImageElement>>(new Map());
+  // Video cache keys by Layer ID to allow independent control of same source
   const [videoCache] = useState<Map<string, HTMLVideoElement>>(new Map());
   
   // Grid canvas cache
@@ -54,15 +55,6 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
   // Selection and Editing State
   const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(null);
   const [editingUV, setEditingUV] = useState<{ index: number, field: 'u'|'v', value: string } | null>(null);
-
-  // Video Player State (for active layer)
-  const [videoState, setVideoState] = useState({
-      isPlaying: false,
-      isMuted: true,
-      volume: 1,
-      currentTime: 0,
-      duration: 0
-  });
 
   const activeLayer = layers.find(l => l.id === activeLayerId);
 
@@ -90,24 +82,12 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
     return newRef;
   };
 
-  // --- Resource Management ---
+  // --- Resource Management & Video Sync ---
 
   useEffect(() => {
     // Manage Video Elements for each layer
     layers.forEach(layer => {
-        if (layer.source?.type === ContentType.VIDEO && layer.source.url) {
-            if (!videoCache.has(layer.source.url)) {
-                const video = document.createElement('video');
-                video.crossOrigin = "anonymous";
-                video.loop = true;
-                video.playsInline = true;
-                video.autoplay = true;
-                video.muted = true; // Start muted
-                video.src = layer.source.url;
-                video.play().catch(() => {});
-                videoCache.set(layer.source.url, video);
-            }
-        }
+        // Image Handling
         if (layer.source?.type === ContentType.IMAGE && layer.source.url) {
             if (!imageCache.has(layer.source.url)) {
                 const img = new Image();
@@ -115,41 +95,56 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
                 img.onload = () => imageCache.set(layer.source.url, img);
             }
         }
+
+        // Video Handling
+        if (layer.source?.type === ContentType.VIDEO && layer.source.url) {
+            let video = videoCache.get(layer.id);
+            if (!video) {
+                video = document.createElement('video');
+                video.crossOrigin = "anonymous";
+                video.loop = true;
+                video.playsInline = true;
+                video.preload = "auto";
+                videoCache.set(layer.id, video);
+                
+                // When metadata loads, update the layer's duration (only if we need to know duration)
+                video.onloadedmetadata = () => {
+                   if (Math.abs(video!.duration - layer.playback.duration) > 0.5) {
+                       onUpdateLayer(layer.id, { playback: { ...layer.playback, duration: video!.duration } });
+                   }
+                };
+            }
+            
+            // Source change
+            if (video.src !== layer.source.url) {
+                video.src = layer.source.url;
+            }
+
+            // --- SYNC LOGIC ---
+            // Force the video element to match the Layer State
+            
+            // Play/Pause
+            if (layer.playback.isPlaying && video.paused) {
+                video.play().catch(e => { /* Autoplay block or other error */ });
+            } else if (!layer.playback.isPlaying && !video.paused) {
+                video.pause();
+            }
+
+            // Volume/Mute
+            if (video.muted !== layer.playback.isMuted) video.muted = layer.playback.isMuted;
+            if (Math.abs(video.volume - layer.playback.volume) > 0.05) video.volume = layer.playback.volume;
+
+            // Seek / Time Sync
+            // Only seek if the divergence is significant to avoid stuttering during normal playback
+            // (e.g., if user dragged slider or paused)
+            const timeDiff = Math.abs(video.currentTime - layer.playback.currentTime);
+            if (timeDiff > 1.0) {
+                 video.currentTime = layer.playback.currentTime;
+            }
+        }
     });
-  }, [layers, videoCache, imageCache]);
+  }, [layers, videoCache, imageCache, onUpdateLayer]);
 
-  // Sync Video Controls with Active Layer's video
-  useEffect(() => {
-     if (!activeLayer || activeLayer.source?.type !== ContentType.VIDEO || !activeLayer.source.url) {
-         return;
-     }
-     const video = videoCache.get(activeLayer.source.url);
-     if (!video) return;
-
-     const updateState = () => {
-         setVideoState({
-             isPlaying: !video.paused,
-             isMuted: video.muted,
-             volume: video.volume,
-             currentTime: video.currentTime,
-             duration: video.duration
-         });
-     };
-
-     video.addEventListener('timeupdate', updateState);
-     video.addEventListener('play', updateState);
-     video.addEventListener('pause', updateState);
-     video.addEventListener('volumechange', updateState);
-     // Initial sync
-     updateState();
-
-     return () => {
-         video.removeEventListener('timeupdate', updateState);
-         video.removeEventListener('play', updateState);
-         video.removeEventListener('pause', updateState);
-         video.removeEventListener('volumechange', updateState);
-     };
-  }, [activeLayerId, layers, videoCache]);
 
   // Initialize Grid Canvas
   useEffect(() => {
@@ -224,8 +219,8 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
           let texW = 1000;
           let texH = 1000;
 
-          if (layer.source.type === ContentType.VIDEO && layer.source.url) {
-              const vid = videoCache.get(layer.source.url);
+          if (layer.source.type === ContentType.VIDEO) {
+              const vid = videoCache.get(layer.id);
               if (vid && vid.readyState >= 2) {
                   texture = vid;
                   texW = vid.videoWidth;
@@ -461,20 +456,24 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
 
   // --- Video HUD Handlers ---
   const handleVideoAction = (action: 'play' | 'pause' | 'volume' | 'seek' | 'mute', value?: number) => {
-      if (!activeLayer || !activeLayer.source?.url) return;
-      const video = videoCache.get(activeLayer.source.url);
-      if (!video) return;
+      if (!activeLayer) return;
+      
+      const newPlayback = { ...activeLayer.playback };
 
-      if (action === 'play') video.play();
-      if (action === 'pause') video.pause();
-      if (action === 'mute') video.muted = !video.muted;
+      if (action === 'play') newPlayback.isPlaying = true;
+      if (action === 'pause') newPlayback.isPlaying = false;
+      if (action === 'mute') newPlayback.isMuted = !newPlayback.isMuted;
       if (action === 'volume' && value !== undefined) {
-          video.volume = value;
-          if (value > 0) video.muted = false;
+          newPlayback.volume = value;
+          if (value > 0) newPlayback.isMuted = false;
       }
       if (action === 'seek' && value !== undefined) {
-          video.currentTime = value;
+          newPlayback.currentTime = value;
       }
+      
+      // We update the layer state. The sync mechanism will propagate this to the Receiver.
+      // The local effect will pick this up and apply it to the <video> element.
+      onUpdateLayer(activeLayer.id, { playback: newPlayback });
   };
 
   // --- UV Handlers ---
@@ -614,14 +613,14 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
                  className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-slate-900/90 backdrop-blur border border-slate-700 rounded-lg p-2 flex items-center gap-3 shadow-2xl z-[100] min-w-[300px]"
                  onMouseDown={(e) => e.stopPropagation()}
                 >
-                 <button onClick={() => handleVideoAction(videoState.isPlaying ? 'pause' : 'play')} className="p-1.5 text-cyan-400 hover:bg-slate-800 rounded-full transition-colors">
-                     {videoState.isPlaying ? <Pause size={18} /> : <Play size={18} />}
+                 <button onClick={() => handleVideoAction(activeLayer.playback.isPlaying ? 'pause' : 'play')} className="p-1.5 text-cyan-400 hover:bg-slate-800 rounded-full transition-colors">
+                     {activeLayer.playback.isPlaying ? <Pause size={18} /> : <Play size={18} />}
                  </button>
  
                  <div className="flex-1 flex flex-col gap-1">
                      <input 
-                         type="range" min={0} max={videoState.duration || 100} step={0.1}
-                         value={videoState.currentTime} 
+                         type="range" min={0} max={activeLayer.playback.duration || 100} step={0.1}
+                         value={activeLayer.playback.currentTime} 
                          onChange={(e) => handleVideoAction('seek', parseFloat(e.target.value))}
                          className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
                      />
@@ -629,12 +628,12 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
  
                  <div className="flex items-center gap-1 group">
                      <button onClick={() => handleVideoAction('mute')} className="text-slate-400 hover:text-white">
-                         {videoState.isMuted || videoState.volume === 0 ? <VolumeX size={16} /> : <Volume2 size={16} />}
+                         {activeLayer.playback.isMuted || activeLayer.playback.volume === 0 ? <VolumeX size={16} /> : <Volume2 size={16} />}
                      </button>
                      <div className="w-0 overflow-hidden group-hover:w-16 transition-all duration-300">
                          <input 
                              type="range" min={0} max={1} step={0.05}
-                             value={videoState.isMuted ? 0 : videoState.volume}
+                             value={activeLayer.playback.isMuted ? 0 : activeLayer.playback.volume}
                              onChange={(e) => handleVideoAction('volume', parseFloat(e.target.value))}
                              className="w-16 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
                          />

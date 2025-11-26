@@ -21,7 +21,14 @@ const createLayer = (name: string, source: ProjectionSource | null = null): Laye
   locked: false,
   opacity: 1,
   source,
-  points: createDefaultPoints(600, 500) // Default size, will be adjusted
+  points: createDefaultPoints(600, 500), // Default size, will be adjusted
+  playback: {
+    isPlaying: true, // Auto-play by default
+    volume: 1,
+    isMuted: true,
+    currentTime: 0,
+    duration: 0
+  }
 });
 
 const App: React.FC = () => {
