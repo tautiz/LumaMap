@@ -60,11 +60,26 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
     return triangulate(points);
   }, [points]);
   
-  // Create refs for draggable handles
-  const pointRefs = useMemo(
-    () => points.map(() => React.createRef<HTMLDivElement>()),
-    [points.length]
-  );
+  // Manage stable refs for draggable elements
+  const pointRefs = useRef<Map<string, React.RefObject<HTMLDivElement>>>(new Map());
+
+  // Helper to ensure we always get a valid ref for a point ID
+  const getPointRef = (id: string) => {
+    if (!pointRefs.current.has(id)) {
+      pointRefs.current.set(id, React.createRef<HTMLDivElement>());
+    }
+    return pointRefs.current.get(id);
+  };
+
+  // Cleanup old refs
+  useEffect(() => {
+    const currentIds = new Set(points.map(p => p.id));
+    for (const id of pointRefs.current.keys()) {
+      if (!currentIds.has(id)) {
+        pointRefs.current.delete(id);
+      }
+    }
+  }, [points]);
 
   // Initialize Video
   useEffect(() => {
@@ -552,10 +567,12 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
           />
 
           {/* Draggable Handles */}
-          {mode === AppMode.MAPPING && points.map((p, idx) => (
+          {mode === AppMode.MAPPING && points.map((p, idx) => {
+              const nodeRef = getPointRef(p.id);
+              return (
               <Draggable
                   key={p.id}
-                  nodeRef={pointRefs[idx]}
+                  nodeRef={nodeRef}
                   position={{ x: p.x, y: p.y }}
                   scale={transform.k} 
                   onDrag={(e, data) => handleDrag(idx, e, data)}
@@ -563,7 +580,7 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
                   onMouseDown={(e) => { e.stopPropagation(); setSelectedPointIndex(idx); }}
               >
                   <div 
-                      ref={pointRefs[idx]}
+                      ref={nodeRef}
                       onContextMenu={(e) => handleRemovePoint(e, idx)}
                       className={`absolute top-0 left-0 w-6 h-6 -ml-3 -mt-3 cursor-crosshair pointer-events-auto group z-50 ${selectedPointIndex === idx ? 'z-[60]' : ''}`}
                   >
@@ -610,7 +627,8 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
                       )}
                   </div>
               </Draggable>
-          ))}
+              );
+          })}
         </div>
 
         {/* HUD: Zoom Controls */}
