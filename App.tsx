@@ -1,10 +1,28 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import ControlPanel from './components/ControlPanel';
 import SurfaceCanvas from './components/SurfaceCanvas';
-import { AppMode, ControlPoint, ProjectionSource, ContentType, Transform } from './types';
+import { AppMode, Layer, ControlPoint, ProjectionSource, ContentType, Transform } from './types';
 
 // Constants
-const CHANNEL_NAME = 'lumamap_sync_v1';
+const CHANNEL_NAME = 'lumamap_sync_v2';
+
+const createDefaultPoints = (w: number, h: number): ControlPoint[] => [
+  { id: 'tl', x: 100, y: 100, u: 0, v: 0 },
+  { id: 'tr', x: w - 100, y: 100, u: 1, v: 0 },
+  { id: 'br', x: w - 100, y: h - 100, u: 1, v: 1 },
+  { id: 'bl', x: 100, y: h - 100, u: 0, v: 1 }
+];
+
+const createLayer = (name: string, source: ProjectionSource | null = null): Layer => ({
+  id: Math.random().toString(36).substr(2, 9),
+  name,
+  visible: true,
+  locked: false,
+  opacity: 1,
+  source,
+  points: createDefaultPoints(600, 500) // Default size, will be adjusted
+});
 
 const App: React.FC = () => {
   // Check if we are in "Receiver/Live" mode
@@ -16,28 +34,75 @@ const App: React.FC = () => {
   
   // Independent transform for the background image
   const [backgroundTransform, setBackgroundTransform] = useState<Transform>({ x: 0, y: 0, k: 1 });
-  // UI state to toggle between moving the camera or moving the background image
   const [isEditingBackground, setIsEditingBackground] = useState(false);
 
-  const [source, setSource] = useState<ProjectionSource>({
-    type: ContentType.SOLID_COLOR,
-    url: '',
-    name: 'Calibration Grid'
-  });
+  // Layer State
+  const [layers, setLayers] = useState<Layer[]>([]);
+  const [activeLayerId, setActiveLayerId] = useState<string | null>(null);
+
+  // Initialize default layer
+  useEffect(() => {
+    if (layers.length === 0 && !isReceiver) {
+        const initialLayer = createLayer('Layer 1', {
+            type: ContentType.SOLID_COLOR,
+            url: '',
+            name: 'Grid Pattern'
+        });
+        setLayers([initialLayer]);
+        setActiveLayerId(initialLayer.id);
+    }
+  }, []); // Run once
   
-  const [points, setPoints] = useState<ControlPoint[]>([
-    { id: 'tl', x: 100, y: 100, u: 0, v: 0 },
-    { id: 'tr', x: 500, y: 100, u: 1, v: 0 },
-    { id: 'br', x: 500, y: 400, u: 1, v: 1 },
-    { id: 'bl', x: 100, y: 400, u: 0, v: 1 }
-  ]);
-  
-  const [opacity, setOpacity] = useState(0.8);
   const [uiVisible, setUiVisible] = useState(true);
   
   // Track canvas dimensions for normalization
   const canvasDims = useRef({ w: 800, h: 600 });
   const channelRef = useRef<BroadcastChannel | null>(null);
+
+  // --- Layer Management Helpers ---
+
+  const updateLayer = (id: string, updates: Partial<Layer>) => {
+    setLayers(prev => prev.map(l => l.id === id ? { ...l, ...updates } : l));
+  };
+
+  const addLayer = () => {
+    const newLayer = createLayer(`Layer ${layers.length + 1}`, {
+        type: ContentType.SOLID_COLOR,
+        url: '',
+        name: 'New Grid'
+    });
+    // Adjust points to center of current view if possible? (Simulated by default points)
+    setLayers(prev => [...prev, newLayer]);
+    setActiveLayerId(newLayer.id);
+  };
+
+  const removeLayer = (id: string) => {
+    setLayers(prev => {
+        const filtered = prev.filter(l => l.id !== id);
+        if (activeLayerId === id && filtered.length > 0) {
+            setActiveLayerId(filtered[0].id);
+        } else if (filtered.length === 0) {
+            setActiveLayerId(null);
+        }
+        return filtered;
+    });
+  };
+
+  const moveLayer = (id: string, direction: 'up' | 'down') => {
+    setLayers(prev => {
+        const idx = prev.findIndex(l => l.id === id);
+        if (idx === -1) return prev;
+        const newLayers = [...prev];
+        if (direction === 'up' && idx < newLayers.length - 1) {
+            [newLayers[idx], newLayers[idx + 1]] = [newLayers[idx + 1], newLayers[idx]];
+        } else if (direction === 'down' && idx > 0) {
+            [newLayers[idx], newLayers[idx - 1]] = [newLayers[idx - 1], newLayers[idx]];
+        }
+        return newLayers;
+    });
+  };
+
+  // --- Synchronization ---
 
   // Initialize BroadcastChannel
   useEffect(() => {
@@ -50,37 +115,31 @@ const App: React.FC = () => {
       if (isReceiver) {
         // RECEIVER LOGIC
         if (type === 'SYNC') {
-            const { points: normPoints, source: newSource, opacity: newOpacity, refSize, bgUrl, bgTransform, showBg } = payload;
+            const { layers: normLayers, refSize, bgUrl, bgTransform, showBg } = payload;
             
-            // Restore Source
-            if (newSource && newSource.file && newSource.file instanceof File) {
-               const newUrl = URL.createObjectURL(newSource.file);
-               setSource({ ...newSource, url: newUrl });
-            } else if (newSource) {
-               setSource(newSource);
-            }
+            // Restore Layers
+            if (normLayers && refSize) {
+                const w = canvasDims.current.w;
+                const h = canvasDims.current.h;
 
-            // Restore Opacity
-            if (newOpacity !== undefined) setOpacity(newOpacity);
+                const restoredLayers: Layer[] = normLayers.map((nl: any) => ({
+                    ...nl,
+                    source: nl.source && nl.source.file && nl.source.file instanceof File 
+                        ? { ...nl.source, url: URL.createObjectURL(nl.source.file) } 
+                        : nl.source,
+                    points: nl.normPoints.map((p: any) => ({
+                        ...p,
+                        x: p.nx * w,
+                        y: p.ny * h
+                    }))
+                }));
+                setLayers(restoredLayers);
+            }
 
             // Restore Background
             if (bgUrl !== undefined) setBackgroundUrl(bgUrl);
             if (bgTransform !== undefined) setBackgroundTransform(bgTransform);
             if (showBg !== undefined) setShowBackgroundInLive(showBg);
-
-            // Restore Points (Denormalize)
-            if (normPoints && refSize) {
-               // We need to convert 0-1 normalized points back to current screen pixels
-               const currentW = canvasDims.current.w;
-               const currentH = canvasDims.current.h;
-               
-               const denormalized = normPoints.map((p: any) => ({
-                   ...p,
-                   x: p.nx * currentW,
-                   y: p.ny * currentH
-               }));
-               setPoints(denormalized);
-            }
         }
       } else {
         // CONTROLLER LOGIC
@@ -91,7 +150,6 @@ const App: React.FC = () => {
     };
 
     if (isReceiver) {
-        // Ask for initial state
         channel.postMessage({ type: 'REQUEST_SYNC' });
     }
 
@@ -104,35 +162,34 @@ const App: React.FC = () => {
   const broadcastState = useCallback(() => {
      if (isReceiver || !channelRef.current) return;
 
-     // Normalize points (0-1) based on current canvas size
      const w = canvasDims.current.w;
      const h = canvasDims.current.h;
-     const normPoints = points.map(p => ({
-         ...p,
-         nx: p.x / w,
-         ny: p.y / h
+
+     // Normalize all layers
+     const normLayers = layers.map(l => ({
+         ...l,
+         normPoints: l.points.map(p => ({ ...p, nx: p.x / w, ny: p.y / h })),
+         points: undefined // Remove raw points from payload
      }));
 
      channelRef.current.postMessage({
          type: 'SYNC',
          payload: {
-             points: normPoints,
-             source,
-             opacity,
+             layers: normLayers,
              refSize: { w, h },
              bgUrl: backgroundUrl,
              bgTransform: backgroundTransform,
              showBg: showBackgroundInLive
          }
      });
-  }, [points, source, opacity, isReceiver, backgroundUrl, backgroundTransform, showBackgroundInLive]);
+  }, [layers, isReceiver, backgroundUrl, backgroundTransform, showBackgroundInLive]);
 
   // Trigger sync on state changes
   useEffect(() => {
       if (!isReceiver) {
           broadcastState();
       }
-  }, [points, source, opacity, broadcastState, isReceiver, backgroundUrl, backgroundTransform, showBackgroundInLive]);
+  }, [layers, broadcastState, isReceiver, backgroundUrl, backgroundTransform, showBackgroundInLive]);
 
   // Re-scale points on receiver when window resizes
   useEffect(() => {
@@ -174,7 +231,6 @@ const App: React.FC = () => {
   const handleUploadBackground = (file: File) => {
     const url = URL.createObjectURL(file);
     setBackgroundUrl(url);
-    // Reset background transform when new image loads
     setBackgroundTransform({ x: 0, y: 0, k: 1 });
   };
 
@@ -191,20 +247,23 @@ const App: React.FC = () => {
   };
 
   const handleSave = () => {
-    const safeSource = source && source.file ? { ...source, file: undefined, url: '' } : source;
+    // Strip blobs before saving
+    const safeLayers = layers.map(l => ({
+        ...l,
+        source: l.source && l.source.url.startsWith('blob:') 
+            ? { ...l.source, url: '', file: undefined } // Cannot save blobs
+            : l.source
+    }));
     
     const data = {
-      version: 1,
-      points,
-      opacity,
-      source: safeSource && safeSource.url.startsWith('blob:') ? null : safeSource,
-      mode,
+      version: 2,
+      layers: safeLayers,
       backgroundTransform
     };
 
     try {
       localStorage.setItem('lumaMapProject', JSON.stringify(data));
-      alert("Project saved!\n\nNote: Geometry, background position, and AI textures are saved. Local uploaded video/image files cannot be saved and must be re-selected.");
+      alert("Project saved! (Note: Local video/image files are not saved, only geometry)");
     } catch (e) {
       console.error("Save failed", e);
       alert("Failed to save project. Storage might be full.");
@@ -220,26 +279,22 @@ const App: React.FC = () => {
 
     try {
       const data = JSON.parse(json);
-      if (data.points && Array.isArray(data.points)) {
-        setPoints(data.points);
+      if (data.layers) {
+        // v2
+        setLayers(data.layers);
+        if (data.layers.length > 0) setActiveLayerId(data.layers[0].id);
+      } else if (data.points) {
+         // Migration from v1
+         const legacyLayer = createLayer('Legacy Layer');
+         legacyLayer.points = data.points;
+         legacyLayer.source = data.source;
+         legacyLayer.opacity = data.opacity || 1;
+         setLayers([legacyLayer]);
+         setActiveLayerId(legacyLayer.id);
       }
-      if (typeof data.opacity === 'number') {
-        setOpacity(data.opacity);
-      }
+
       if (data.backgroundTransform) {
         setBackgroundTransform(data.backgroundTransform);
-      }
-      if (data.source) {
-        setSource(data.source);
-      } else {
-        setSource({
-          type: ContentType.SOLID_COLOR,
-          url: '',
-          name: 'Calibration Grid'
-        });
-      }
-      if (data.mode) {
-        setMode(data.mode);
       }
       alert("Project loaded successfully.");
     } catch (e) {
@@ -248,9 +303,6 @@ const App: React.FC = () => {
     }
   };
 
-  // Determine if background should be visible
-  // In SETUP/MAPPING: Always show if URL exists
-  // In LIVE (or Receiver): Only show if showBackgroundInLive is true
   const shouldShowBackground = !!backgroundUrl && ((!isReceiver && mode !== AppMode.LIVE) || showBackgroundInLive);
 
   return (
@@ -259,12 +311,19 @@ const App: React.FC = () => {
         <ControlPanel
           mode={mode}
           setMode={setMode}
-          setSource={setSource}
+          
+          // Layer Props
+          layers={layers}
+          activeLayerId={activeLayerId}
+          onAddLayer={addLayer}
+          onRemoveLayer={removeLayer}
+          onSelectLayer={setActiveLayerId}
+          onUpdateLayer={updateLayer}
+          onMoveLayer={moveLayer}
+
           toggleFullscreen={toggleFullscreen}
           backgroundUrl={backgroundUrl}
           onUploadBackground={handleUploadBackground}
-          opacity={opacity}
-          setOpacity={setOpacity}
           onSave={handleSave}
           onLoad={handleLoad}
           onOpenLive={handleOpenLive}
@@ -273,6 +332,10 @@ const App: React.FC = () => {
           setShowBackgroundInLive={setShowBackgroundInLive}
           isEditingBackground={isEditingBackground}
           setIsEditingBackground={setIsEditingBackground}
+
+          // Background Transform Control
+          backgroundTransform={backgroundTransform}
+          setBackgroundTransform={setBackgroundTransform}
         />
       )}
 
@@ -280,10 +343,12 @@ const App: React.FC = () => {
         <SurfaceCanvas
           mode={mode}
           backgroundUrl={shouldShowBackground ? backgroundUrl : null}
-          points={points}
-          setPoints={setPoints}
-          source={source}
-          opacity={opacity}
+          
+          layers={layers}
+          activeLayerId={activeLayerId}
+          onUpdateLayer={updateLayer}
+          onSelectLayer={setActiveLayerId}
+
           onDimensionsChange={(w, h) => { canvasDims.current = { w, h }; }}
           
           backgroundTransform={backgroundTransform}
@@ -296,13 +361,10 @@ const App: React.FC = () => {
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <div className="bg-black/80 backdrop-blur text-white p-8 rounded-xl border border-slate-700 max-w-md text-center">
               <h2 className="text-2xl font-bold mb-4 text-cyan-400">Welcome to LumaMap</h2>
-              <p className="text-slate-300 mb-4">
-                This tool allows you to map digital content onto physical objects.
-              </p>
               <div className="text-sm text-slate-400 space-y-2">
                 <p>1. Connect a projector and extend your display.</p>
-                <p>2. Upload a photo of the surface (taken from the projector's viewpoint) or use the camera.</p>
-                <p>3. Use the sidebar to calibrate corners and generate textures.</p>
+                <p>2. Upload a photo of the surface (Reference).</p>
+                <p>3. Use <strong>Map</strong> mode to add Layers and warp them.</p>
               </div>
             </div>
           </div>

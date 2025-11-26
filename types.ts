@@ -1,3 +1,4 @@
+
 export interface Point {
   x: number;
   y: number;
@@ -30,11 +31,23 @@ export interface Transform {
   k: number;
 }
 
-export interface ProjectorState {
-  points: ControlPoint[];
+export interface Layer {
+  id: string;
+  name: string;
+  visible: boolean;
+  locked: boolean;
   opacity: number;
-  isActive: boolean;
   source: ProjectionSource | null;
+  points: ControlPoint[];
+}
+
+export interface ProjectorState {
+  layers: Layer[];
+  activeLayerId: string | null;
+  isActive: boolean;
+  // Background Ref is separate from layers
+  backgroundUrl: string | null;
+  backgroundTransform: Transform;
 }
 
 export enum AppMode {

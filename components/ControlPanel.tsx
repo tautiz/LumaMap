@@ -1,47 +1,66 @@
+
 import React, { useState } from 'react';
-import { AppMode, ProjectionSource, ContentType } from '../types';
+import { AppMode, ProjectionSource, ContentType, Layer, Transform } from '../types';
 import { generateTexture } from '../services/gemini';
-import { Upload, Monitor, Square, Layers, Sparkles, Move, Maximize, Image as ImageIcon, Save, FolderOpen, ExternalLink, Eye, EyeOff, Move3d } from 'lucide-react';
+import { Upload, Monitor, Square, Layers, Sparkles, Move, Maximize, Image as ImageIcon, Save, FolderOpen, ExternalLink, Eye, EyeOff, Move3d, Plus, Trash2, ChevronUp, ChevronDown, Lock, Unlock } from 'lucide-react';
 
 interface ControlPanelProps {
   mode: AppMode;
   setMode: (mode: AppMode) => void;
-  setSource: (source: ProjectionSource) => void;
+  
+  // Layer Management
+  layers: Layer[];
+  activeLayerId: string | null;
+  onAddLayer: () => void;
+  onRemoveLayer: (id: string) => void;
+  onSelectLayer: (id: string) => void;
+  onUpdateLayer: (id: string, updates: Partial<Layer>) => void;
+  onMoveLayer: (id: string, dir: 'up' | 'down') => void;
+
   toggleFullscreen: () => void;
   backgroundUrl: string | null;
   onUploadBackground: (file: File) => void;
-  opacity: number;
-  setOpacity: (val: number) => void;
+
   onSave: () => void;
   onLoad: () => void;
   onOpenLive: () => void;
 
-  // New props for background control
   showBackgroundInLive: boolean;
   setShowBackgroundInLive: (val: boolean) => void;
   isEditingBackground: boolean;
   setIsEditingBackground: (val: boolean) => void;
+
+  backgroundTransform: Transform;
+  setBackgroundTransform: (t: Transform) => void;
 }
 
 const ControlPanel: React.FC<ControlPanelProps> = ({
   mode,
   setMode,
-  setSource,
+  layers,
+  activeLayerId,
+  onAddLayer,
+  onRemoveLayer,
+  onSelectLayer,
+  onUpdateLayer,
+  onMoveLayer,
   toggleFullscreen,
   backgroundUrl,
   onUploadBackground,
-  opacity,
-  setOpacity,
   onSave,
   onLoad,
   onOpenLive,
   showBackgroundInLive,
   setShowBackgroundInLive,
   isEditingBackground,
-  setIsEditingBackground
+  setIsEditingBackground,
+  backgroundTransform,
+  setBackgroundTransform
 }) => {
   const [texturePrompt, setTexturePrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+
+  const activeLayer = layers.find(l => l.id === activeLayerId);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'BACKGROUND' | 'CONTENT') => {
     const file = e.target.files?.[0];
@@ -50,26 +69,31 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
     if (type === 'BACKGROUND') {
       onUploadBackground(file);
     } else {
+      if (!activeLayer) return;
       const url = URL.createObjectURL(file);
       const isVideo = file.type.startsWith('video');
-      setSource({
-        type: isVideo ? ContentType.VIDEO : ContentType.IMAGE,
-        url,
-        name: file.name,
-        file: file // Store the file for syncing
+      onUpdateLayer(activeLayer.id, {
+          source: {
+            type: isVideo ? ContentType.VIDEO : ContentType.IMAGE,
+            url,
+            name: file.name,
+            file: file
+          }
       });
     }
   };
 
   const handleGenerateTexture = async () => {
-    if (!texturePrompt) return;
+    if (!texturePrompt || !activeLayer) return;
     setIsGenerating(true);
     try {
       const base64Image = await generateTexture(texturePrompt);
-      setSource({
-        type: ContentType.IMAGE,
-        url: base64Image,
-        name: `AI: ${texturePrompt}`
+      onUpdateLayer(activeLayer.id, {
+          source: {
+            type: ContentType.IMAGE,
+            url: base64Image,
+            name: `AI: ${texturePrompt}`
+          }
       });
     } catch (error) {
       alert("Failed to generate texture. Check console.");
@@ -119,7 +143,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         </button>
       </div>
 
-      {/* Live Window Trigger */}
       <button 
         onClick={onOpenLive}
         className="w-full py-2 border border-slate-600 rounded text-slate-300 hover:bg-slate-800 flex items-center justify-center gap-2 text-sm"
@@ -131,11 +154,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
       {mode === AppMode.SETUP && (
         <div className="space-y-4 border-t border-slate-800 pt-4">
           <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-            <Monitor size={16} /> Surface Setup
+            <Monitor size={16} /> Reference Setup
           </h2>
-          <p className="text-xs text-slate-400">
-            Upload a photo of your projection surface to use as a reference.
-          </p>
           
           <div className="border-2 border-dashed border-slate-700 rounded-lg p-6 flex flex-col items-center justify-center text-center hover:border-cyan-500 hover:bg-slate-800/50 transition-colors cursor-pointer relative">
             <input 
@@ -149,8 +169,38 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
           </div>
 
           {backgroundUrl && (
-             <div className="space-y-2">
-                {/* Background Adjustment Toggle */}
+             <div className="space-y-3 bg-slate-800/50 p-3 rounded-lg border border-slate-700">
+                <div className="flex justify-between items-center text-xs text-slate-400">
+                    <span>Position X</span>
+                    <input 
+                        type="number" className="w-16 bg-slate-900 border border-slate-700 rounded px-1"
+                        value={Math.round(backgroundTransform.x)}
+                        onChange={e => setBackgroundTransform({...backgroundTransform, x: Number(e.target.value)})}
+                    />
+                </div>
+                <div className="flex justify-between items-center text-xs text-slate-400">
+                    <span>Position Y</span>
+                    <input 
+                        type="number" className="w-16 bg-slate-900 border border-slate-700 rounded px-1"
+                        value={Math.round(backgroundTransform.y)}
+                        onChange={e => setBackgroundTransform({...backgroundTransform, y: Number(e.target.value)})}
+                    />
+                </div>
+                <div className="flex justify-between items-center text-xs text-slate-400">
+                    <span>Scale</span>
+                    <div className="flex items-center gap-2">
+                         <input 
+                            type="range" min="0.1" max="5" step="0.01" 
+                            className="w-20"
+                            value={backgroundTransform.k}
+                            onChange={e => setBackgroundTransform({...backgroundTransform, k: Number(e.target.value)})}
+                        />
+                        <span className="w-8 text-right">{backgroundTransform.k.toFixed(2)}</span>
+                    </div>
+                </div>
+
+                <div className="h-px bg-slate-700 my-2"></div>
+
                 <button
                     onClick={() => setIsEditingBackground(!isEditingBackground)}
                     className={`w-full py-2 rounded text-xs font-medium flex items-center justify-center gap-2 transition-colors ${
@@ -158,110 +208,139 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                     }`}
                 >
                     <Move3d size={14} />
-                    {isEditingBackground ? 'Done Adjusting Position' : 'Adjust Photo Position'}
-                </button>
-
-                {/* Live Visibility Toggle */}
-                <button
-                    onClick={() => setShowBackgroundInLive(!showBackgroundInLive)}
-                    className={`w-full py-2 rounded text-xs font-medium flex items-center justify-center gap-2 transition-colors ${
-                        showBackgroundInLive ? 'bg-green-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-                    }`}
-                >
-                    {showBackgroundInLive ? <Eye size={14} /> : <EyeOff size={14} />}
-                    {showBackgroundInLive ? 'Visible on Live Display' : 'Hidden on Live Display'}
+                    {isEditingBackground ? 'Stop Visual Adjust' : 'Visually Adjust'}
                 </button>
              </div>
           )}
 
           {backgroundUrl && (
-             <button onClick={toggleFullscreen} className="w-full py-2 mt-4 bg-slate-800 hover:bg-slate-700 rounded text-sm text-cyan-400 font-medium">
-                Enter Fullscreen Projection
-             </button>
+             <div className="flex gap-2">
+                 <button
+                    onClick={() => setShowBackgroundInLive(!showBackgroundInLive)}
+                    className={`flex-1 py-2 rounded text-xs font-medium flex items-center justify-center gap-2 transition-colors ${
+                        showBackgroundInLive ? 'bg-green-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                    }`}
+                >
+                    {showBackgroundInLive ? <Eye size={14} /> : <EyeOff size={14} />}
+                    {showBackgroundInLive ? 'Live: Visible' : 'Live: Hidden'}
+                </button>
+                 <button onClick={toggleFullscreen} className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 rounded text-sm text-cyan-400 font-medium">
+                    Fullscreen
+                 </button>
+             </div>
           )}
         </div>
       )}
 
-      {/* Mapping Section */}
+      {/* Mapping Section - Layers */}
       {mode === AppMode.MAPPING && (
         <div className="space-y-4 border-t border-slate-800 pt-4">
-          <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-            <Layers size={16} /> Projection Source
-          </h2>
-
-          <div className="bg-cyan-900/30 border border-cyan-800 p-3 rounded text-xs text-cyan-200">
-             <strong>Advanced Warping:</strong><br/>
-             • Double-click to add point<br/>
-             • Right-click point to remove<br/>
-             • Drag points to warp
-          </div>
-
-          {/* Opacity Slider */}
-          <div>
-            <label className="text-xs text-slate-400 mb-1 block">Mapping Opacity</label>
-            <input 
-              type="range" 
-              min="0" 
-              max="1" 
-              step="0.05" 
-              value={opacity} 
-              onChange={(e) => setOpacity(parseFloat(e.target.value))}
-              className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
-            />
-          </div>
-
-          {/* Content Uploader */}
-           <div className="grid grid-cols-2 gap-2">
-              <div className="relative border border-slate-700 bg-slate-800 rounded p-3 flex flex-col items-center hover:bg-slate-700 cursor-pointer">
-                 <input type="file" accept="image/*,video/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => handleFileUpload(e, 'CONTENT')} />
-                 <ImageIcon size={20} className="mb-1 text-purple-400" />
-                 <span className="text-xs">Media</span>
-              </div>
-              <button 
-                onClick={() => setSource({ type: ContentType.SOLID_COLOR, url: '', name: 'Grid Pattern' })}
-                className="border border-slate-700 bg-slate-800 rounded p-3 flex flex-col items-center hover:bg-slate-700"
-              >
-                 <Square size={20} className="mb-1 text-green-400" />
-                 <span className="text-xs">Grid</span>
-              </button>
-           </div>
-
-           {/* Gemini GenAI Section */}
-           <div className="pt-2 border-t border-slate-800">
-             <div className="flex items-center gap-2 mb-2">
-                <Sparkles size={14} className="text-yellow-400" />
-                <span className="text-xs font-semibold text-yellow-400">AI Texture Gen</span>
-             </div>
-             <div className="flex gap-2 mb-2">
-                <input 
-                  type="text" 
-                  value={texturePrompt}
-                  onChange={(e) => setTexturePrompt(e.target.value)}
-                  placeholder="e.g. Neon cyber circuit..."
-                  className="flex-1 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-sm focus:outline-none focus:border-yellow-500"
-                />
-             </div>
-             <button 
-                onClick={handleGenerateTexture}
-                disabled={isGenerating || !texturePrompt}
-                className="w-full py-2 bg-gradient-to-r from-yellow-600 to-orange-600 rounded text-sm font-medium hover:brightness-110 disabled:opacity-50 flex items-center justify-center gap-2"
-             >
-                {isGenerating ? 'Dreaming...' : 'Generate Texture'}
+          <div className="flex justify-between items-center">
+             <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                <Layers size={16} /> Scene Layers
+             </h2>
+             <button onClick={onAddLayer} className="p-1 text-cyan-400 hover:bg-slate-800 rounded">
+                 <Plus size={16} />
              </button>
-           </div>
+          </div>
+
+          {/* Layer List */}
+          <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
+             {layers.slice().reverse().map((layer) => (
+                 <div 
+                    key={layer.id}
+                    onClick={() => onSelectLayer(layer.id)}
+                    className={`flex items-center gap-2 p-2 rounded text-xs cursor-pointer border ${activeLayerId === layer.id ? 'border-cyan-500 bg-cyan-900/20' : 'border-transparent hover:bg-slate-800'}`}
+                 >
+                     <button 
+                        onClick={(e) => { e.stopPropagation(); onUpdateLayer(layer.id, { visible: !layer.visible }); }}
+                        className={layer.visible ? 'text-slate-300' : 'text-slate-600'}
+                     >
+                         {layer.visible ? <Eye size={14} /> : <EyeOff size={14} />}
+                     </button>
+                     <span className="flex-1 truncate font-medium text-slate-200">{layer.name}</span>
+                     
+                     <div className="flex gap-1 opacity-50 hover:opacity-100">
+                        <button onClick={(e) => { e.stopPropagation(); onMoveLayer(layer.id, 'up'); }}><ChevronUp size={12} /></button>
+                        <button onClick={(e) => { e.stopPropagation(); onMoveLayer(layer.id, 'down'); }}><ChevronDown size={12} /></button>
+                        <button onClick={(e) => { e.stopPropagation(); onRemoveLayer(layer.id); }} className="hover:text-red-400"><Trash2 size={12} /></button>
+                     </div>
+                 </div>
+             ))}
+          </div>
+
+          {activeLayer && (
+            <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700 space-y-3">
+               <div className="flex justify-between items-center">
+                  <span className="text-xs font-bold text-cyan-400">Selected Layer Properties</span>
+                  <button onClick={() => onUpdateLayer(activeLayer.id, { locked: !activeLayer.locked })} className="text-slate-400 hover:text-white">
+                      {activeLayer.locked ? <Lock size={14} /> : <Unlock size={14} />}
+                  </button>
+               </div>
+               
+               {/* Name Edit */}
+               <input 
+                  type="text" 
+                  value={activeLayer.name} 
+                  onChange={(e) => onUpdateLayer(activeLayer.id, { name: e.target.value })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-300 mb-2"
+               />
+
+               {/* Opacity */}
+               <div>
+                    <label className="text-[10px] text-slate-400 block mb-1">Opacity</label>
+                    <input 
+                    type="range" min="0" max="1" step="0.05" 
+                    value={activeLayer.opacity} 
+                    onChange={(e) => onUpdateLayer(activeLayer.id, { opacity: parseFloat(e.target.value) })}
+                    className="w-full h-1 bg-slate-700 rounded appearance-none"
+                    />
+               </div>
+
+                {/* Content Uploader */}
+                <div className="grid grid-cols-2 gap-2 pt-2">
+                    <div className="relative border border-slate-700 bg-slate-900 rounded p-2 flex flex-col items-center hover:bg-slate-700 cursor-pointer">
+                        <input type="file" accept="image/*,video/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => handleFileUpload(e, 'CONTENT')} />
+                        <ImageIcon size={16} className="mb-1 text-purple-400" />
+                        <span className="text-[10px]">Upload Media</span>
+                    </div>
+                    <button 
+                        onClick={() => onUpdateLayer(activeLayer.id, { source: { type: ContentType.SOLID_COLOR, url: '', name: 'Grid Pattern' } })}
+                        className="border border-slate-700 bg-slate-900 rounded p-2 flex flex-col items-center hover:bg-slate-700"
+                    >
+                        <Square size={16} className="mb-1 text-green-400" />
+                        <span className="text-[10px]">Reset to Grid</span>
+                    </button>
+                </div>
+
+                {/* Gemini */}
+                <div className="pt-2 border-t border-slate-700">
+                    <div className="flex gap-2 mb-2">
+                        <input 
+                        type="text" 
+                        value={texturePrompt}
+                        onChange={(e) => setTexturePrompt(e.target.value)}
+                        placeholder="AI Texture Prompt..."
+                        className="flex-1 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs focus:outline-none"
+                        />
+                    </div>
+                    <button 
+                        onClick={handleGenerateTexture}
+                        disabled={isGenerating || !texturePrompt}
+                        className="w-full py-1.5 bg-gradient-to-r from-yellow-600 to-orange-600 rounded text-xs font-medium hover:brightness-110 disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                        {isGenerating ? 'Generating...' : 'Generate AI Texture'}
+                    </button>
+                </div>
+
+                <div className="text-[10px] text-slate-500 pt-1">
+                   {activeLayer.source ? `Source: ${activeLayer.source.name}` : 'No source selected'}
+                </div>
+            </div>
+          )}
+
         </div>
       )}
-
-      {/* Instructions */}
-      <div className="mt-auto border-t border-slate-800 pt-4 text-xs text-slate-500">
-        <p className="font-semibold mb-1">Quick Guide:</p>
-        <ul className="list-disc pl-4 space-y-1">
-          <li>Start in <strong>Setup</strong> to upload a photo of the target object.</li>
-          <li>Adjust Background position if needed.</li>
-          <li>Switch to <strong>Map</strong> to drag points to align projection.</li>
-          <li>Go <strong>Live</strong> and maximize window on projector.</li>
-        </ul>
-      </div>
     </div>
   );
 };
