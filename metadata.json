@@ -1,0 +1,7 @@
+{
+  "name": "LumaMap - 3D Projection Mapping",
+  "description": "A web-based projection mapping tool allowing users to calibrate video and AI-generated textures onto physical surfaces using 4-point homography warping.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
