@@ -1,6 +1,6 @@
 
-import React, { useRef, useEffect, useState, useMemo } from 'react';
-import { ControlPoint, ProjectionSource, ContentType, AppMode, Transform, Layer } from '../types';
+import React, { useRef, useEffect, useState } from 'react';
+import { ControlPoint, ContentType, AppMode, Transform, Layer } from '../types';
 import { triangulate, solveAffine, getBarycentric, pointInTriangle } from '../utils/math';
 import Draggable from 'react-draggable';
 import { ZoomIn, ZoomOut, RefreshCw, Play, Pause, Volume2, VolumeX } from 'lucide-react';
@@ -21,6 +21,9 @@ interface SurfaceCanvasProps {
   backgroundTransform?: Transform;
   onBackgroundTransformChange?: (t: Transform) => void;
   isEditingBackground?: boolean;
+
+  // Projector Resolution
+  projectorSize?: { w: number, h: number };
 }
 
 const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
@@ -33,23 +36,26 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
   onDimensionsChange,
   backgroundTransform = { x: 0, y: 0, k: 1 },
   onBackgroundTransformChange,
-  isEditingBackground = false
+  isEditingBackground = false,
+  projectorSize
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [containerSize, setContainerSize] = useState({ w: 800, h: 600 });
+  const [containerSize, setContainerSize] = useState({ w: 2363, h: 1320 });
   
   // Resource Cache
   const [imageCache] = useState<Map<string, HTMLImageElement>>(new Map());
-  // Video cache keys by Layer ID to allow independent control of same source
   const [videoCache] = useState<Map<string, HTMLVideoElement>>(new Map());
-  
-  // Grid canvas cache
   const gridCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Global Pan and Zoom State (Camera)
-  const [transform, setTransform] = useState({ x: 0, y: 0, k: 1 });
+  const [transform, setTransform] = useState({ x: 20, y: 20, k: 0.8 }); // Start slightly zoomed out and padded
+  
+  // Interactivity State
   const [isPanning, setIsPanning] = useState(false);
+  const [isLayerDragging, setIsLayerDragging] = useState(false);
+  const [draggedLayerId, setDraggedLayerId] = useState<string | null>(null);
+  
   const lastPanRef = useRef({ x: 0, y: 0 });
 
   // Selection and Editing State
@@ -85,9 +91,7 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
   // --- Resource Management & Video Sync ---
 
   useEffect(() => {
-    // Manage Video Elements for each layer
     layers.forEach(layer => {
-        // Image Handling
         if (layer.source?.type === ContentType.IMAGE && layer.source.url) {
             if (!imageCache.has(layer.source.url)) {
                 const img = new Image();
@@ -96,7 +100,6 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
             }
         }
 
-        // Video Handling
         if (layer.source?.type === ContentType.VIDEO && layer.source.url) {
             let video = videoCache.get(layer.id);
             if (!video) {
@@ -107,7 +110,6 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
                 video.preload = "auto";
                 videoCache.set(layer.id, video);
                 
-                // When metadata loads, update the layer's duration (only if we need to know duration)
                 video.onloadedmetadata = () => {
                    if (Math.abs(video!.duration - layer.playback.duration) > 0.5) {
                        onUpdateLayer(layer.id, { playback: { ...layer.playback, duration: video!.duration } });
@@ -115,29 +117,21 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
                 };
             }
             
-            // Source change
             if (video.src !== layer.source.url) {
                 video.src = layer.source.url;
             }
 
-            // --- SYNC LOGIC ---
-            // Force the video element to match the Layer State
-            
-            // Play/Pause
             if (layer.playback.isPlaying && video.paused) {
-                video.play().catch(e => { /* Autoplay block or other error */ });
+                video.play().catch(e => { });
             } else if (!layer.playback.isPlaying && !video.paused) {
                 video.pause();
             }
 
-            // Volume/Mute
             if (video.muted !== layer.playback.isMuted) video.muted = layer.playback.isMuted;
             if (Math.abs(video.volume - layer.playback.volume) > 0.05) video.volume = layer.playback.volume;
 
-            // Seek / Time Sync
-            // Only seek if the divergence is significant to avoid stuttering during normal playback
-            // (e.g., if user dragged slider or paused)
             const timeDiff = Math.abs(video.currentTime - layer.playback.currentTime);
+            // Allow a larger drift during transitions (video restart) to avoid fighting
             if (timeDiff > 1.0) {
                  video.currentTime = layer.playback.currentTime;
             }
@@ -145,8 +139,6 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
     });
   }, [layers, videoCache, imageCache, onUpdateLayer]);
 
-
-  // Initialize Grid Canvas
   useEffect(() => {
       if (!gridCanvasRef.current) {
           const c = document.createElement('canvas');
@@ -169,51 +161,64 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
       }
   }, []);
 
-  // Handle Resize
+  // Handle Resize and Resolution
   useEffect(() => {
     const updateSize = () => {
-      if (containerRef.current) {
-        const w = containerRef.current.clientWidth;
-        const h = containerRef.current.clientHeight;
-        setContainerSize({ w, h });
-        if (onDimensionsChange) {
-            onDimensionsChange(w, h);
-        }
+      // If explicit resolution is provided (via props), use it as the logical size
+      if (projectorSize) {
+          setContainerSize(projectorSize);
+          if (onDimensionsChange) onDimensionsChange(projectorSize.w, projectorSize.h);
+      } else if (containerRef.current) {
+          // Otherwise adapt to container
+          const w = containerRef.current.clientWidth;
+          const h = containerRef.current.clientHeight;
+          setContainerSize({ w, h });
+          if (onDimensionsChange) onDimensionsChange(w, h);
       }
     };
+    
     window.addEventListener('resize', updateSize);
-    updateSize();
+    updateSize(); // Initial
     return () => window.removeEventListener('resize', updateSize);
-  }, [onDimensionsChange]);
+  }, [onDimensionsChange, projectorSize]);
 
   // --- Render Loop ---
 
   useEffect(() => {
     let animationFrameId: number;
     const canvas = canvasRef.current;
-    const ctx = canvas?.getContext('2d');
+    const ctx = canvas?.getContext('2d', { alpha: false }); // Optimize for no transparency on bg if possible, but we need it for layers
 
     const render = () => {
       if (!canvas || !ctx) return;
 
+      // Ensure canvas DOM size matches logical size
       if (canvas.width !== containerSize.w || canvas.height !== containerSize.h) {
         canvas.width = containerSize.w;
         canvas.height = containerSize.h;
       }
 
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // Clear
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      // Render each visible layer
+      // Render layers
       layers.forEach(layer => {
           if (!layer.visible) return;
           if (!layer.source) return;
           if (layer.points.length < 3) return;
 
-          // Triangulate on fly (fast enough)
+          // Calculate final opacity: User setting * System transition
+          // Default transitionOpacity to 1 if undefined
+          const transitionOpacity = layer.transitionOpacity !== undefined ? layer.transitionOpacity : 1;
+          const finalOpacity = layer.opacity * transitionOpacity;
+
+          if (finalOpacity <= 0.01) return; // Skip if basically invisible
+
           const triangles = triangulate(layer.points);
           if (triangles.length === 0) return;
 
-          ctx.globalAlpha = mode === AppMode.MAPPING ? layer.opacity : 1;
+          ctx.globalAlpha = finalOpacity;
 
           let texture: CanvasImageSource | null = null;
           let texW = 1000;
@@ -245,7 +250,9 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
                  pattern = ctx.createPattern(texture, 'repeat');
              } catch (e) {}
 
-             // Draw Triangles
+             // Optimization: Use imageSmoothing for smoother video, but sometimes 'false' reduces blur at edges.
+             ctx.imageSmoothingEnabled = true;
+
              for (let i = 0; i < triangles.length; i += 3) {
                  const i0 = triangles[i];
                  const i1 = triangles[i + 1];
@@ -264,23 +271,53 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
 
                  ctx.save();
                  ctx.beginPath();
-                 ctx.moveTo(p0.x, p0.y);
-                 ctx.lineTo(p1.x, p1.y);
-                 ctx.lineTo(p2.x, p2.y);
+                 
+                 // SEAM FIX: Expand the clipping triangle slightly (0.5px) outwards from centroid
+                 // This overlaps adjacent triangles to hide the sub-pixel gap/lines in Live mode
+                 const cx = (p0.x + p1.x + p2.x) / 3;
+                 const cy = (p0.y + p1.y + p2.y) / 3;
+                 
+                 // Small expansion factor. 0.5px is usually enough.
+                 // We add a tiny vector from centroid to vertex.
+                 // Note: This distorts the texture map slightly at edges but eliminates the seam.
+                 const expansion = 0.6; // pixels roughly
+                 
+                 const expand = (x: number, y: number) => {
+                     const dx = x - cx;
+                     const dy = y - cy;
+                     const len = Math.sqrt(dx*dx + dy*dy);
+                     if (len === 0) return { x, y };
+                     return { 
+                         x: x + (dx / len) * expansion, 
+                         y: y + (dy / len) * expansion 
+                     };
+                 }
+                 
+                 const ep0 = expand(p0.x, p0.y);
+                 const ep1 = expand(p1.x, p1.y);
+                 const ep2 = expand(p2.x, p2.y);
+
+                 ctx.moveTo(ep0.x, ep0.y);
+                 ctx.lineTo(ep1.x, ep1.y);
+                 ctx.lineTo(ep2.x, ep2.y);
                  ctx.closePath();
+                 
                  ctx.clip();
+                 
+                 // Reset transform to draw the texture
                  ctx.setTransform(a, b, c, d, e, f);
 
                  if (pattern) {
                      ctx.fillStyle = pattern;
-                     // Fill rect covering the triangle in texture space
+                     // Fill large rect in texture space
                      const uCoords = [p0.u, p1.u, p2.u];
                      const vCoords = [p0.v, p1.v, p2.v];
                      const minU = Math.min(...uCoords) * texW;
                      const maxU = Math.max(...uCoords) * texW;
                      const minV = Math.min(...vCoords) * texH;
                      const maxV = Math.max(...vCoords) * texH;
-                     ctx.fillRect(minU - 1, minV - 1, (maxU - minU) + 2, (maxV - minV) + 2);
+                     // Draw slightly larger to cover dilation
+                     ctx.fillRect(minU - 2, minV - 2, (maxU - minU) + 4, (maxV - minV) + 4);
                  } else {
                      ctx.drawImage(texture, 0, 0, texW, texH);
                  }
@@ -289,7 +326,29 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
           }
       });
 
-      // Draw Wireframe for Active Layer
+      // --- Draw Scene Bounds & Wireframe (Overlay) ---
+      
+      // Bounds (Visible in SETUP and MAPPING)
+      // Only draw if we are NOT in Live (or if we are editing background in non-live)
+      // The prompt asks for visibility in SETUP mode too.
+      if ((mode === AppMode.MAPPING || mode === AppMode.SETUP) && !isEditingBackground) {
+          ctx.save();
+          ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform just in case
+          
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([8, 8]);
+          // Draw rect
+          ctx.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
+          
+          // Label
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+          ctx.font = '12px monospace';
+          ctx.fillText(`BOUNDS: ${canvas.width}x${canvas.height}`, 10, 20);
+          ctx.restore();
+      }
+
+      // Wireframe (Only Active Layer in MAPPING)
       if (mode === AppMode.MAPPING && activeLayer && !activeLayer.locked) {
           const triangles = triangulate(activeLayer.points);
           ctx.globalAlpha = 1;
@@ -315,14 +374,60 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
 
     render();
     return () => cancelAnimationFrame(animationFrameId);
-  }, [containerSize, layers, activeLayerId, mode, transform.k, videoCache, imageCache]);
+  }, [containerSize, layers, activeLayerId, mode, transform.k, videoCache, imageCache, isEditingBackground]);
+
+  // --- Keyboard Control (Nudge) ---
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+        // Only valid in Mapping mode, with an active unlocked layer
+        if (mode !== AppMode.MAPPING || !activeLayer || activeLayer.locked) return;
+        
+        // Don't trigger if user is typing in an input field
+        const target = e.target as HTMLElement;
+        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+
+        let dx = 0;
+        let dy = 0;
+        const step = e.shiftKey ? 10 : 1; // 1px normal, 10px with Shift
+
+        switch (e.key) {
+            case 'ArrowLeft': dx = -step; break;
+            case 'ArrowRight': dx = step; break;
+            case 'ArrowUp': dy = -step; break;
+            case 'ArrowDown': dy = step; break;
+            default: return; // Not an arrow key
+        }
+
+        e.preventDefault(); // Prevent scrolling
+
+        if (selectedPointIndex !== null) {
+            // Move selected point
+            const newPoints = [...activeLayer.points];
+            const p = newPoints[selectedPointIndex];
+            if (p) {
+                newPoints[selectedPointIndex] = { ...p, x: p.x + dx, y: p.y + dy };
+                onUpdateLayer(activeLayer.id, { points: newPoints });
+            }
+        } else {
+            // Move entire layer (all points)
+            const newPoints = activeLayer.points.map(p => ({
+                ...p,
+                x: p.x + dx,
+                y: p.y + dy
+            }));
+            onUpdateLayer(activeLayer.id, { points: newPoints });
+        }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [mode, activeLayer, selectedPointIndex, onUpdateLayer]);
 
   // --- Interactions ---
 
   const handleWheel = (e: React.WheelEvent) => {
     if (mode === AppMode.LIVE) return;
     
-    // Background Zoom
     if (isEditingBackground && onBackgroundTransformChange) {
         const scaleFactor = 1.05;
         const newK = e.deltaY < 0 
@@ -336,7 +441,6 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
         return;
     }
 
-    // Camera Zoom
     const scaleFactor = 1.1;
     const newK = e.deltaY < 0 
       ? Math.min(transform.k * scaleFactor, 10) 
@@ -352,46 +456,98 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
     setTransform({ x: newX, y: newY, k: newK });
   };
 
-  const startPan = (e: React.MouseEvent) => {
+  const handleMouseDown = (e: React.MouseEvent) => {
     if (mode === AppMode.LIVE) return;
-    
-    // Deselect if clicking background
-    if (selectedPointIndex !== null) {
-        setSelectedPointIndex(null);
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    const rawX = e.clientX - rect.left;
+    const rawY = e.clientY - rect.top;
+    const worldX = (rawX - transform.x) / transform.k;
+    const worldY = (rawY - transform.y) / transform.k;
+
+    if (!isEditingBackground && mode === AppMode.MAPPING) {
+        for (let i = layers.length - 1; i >= 0; i--) {
+            const layer = layers[i];
+            if (!layer.visible || layer.locked) continue;
+            
+            const triangles = triangulate(layer.points);
+            let hit = false;
+            for (let t = 0; t < triangles.length; t += 3) {
+                const p0 = layer.points[triangles[t]];
+                const p1 = layer.points[triangles[t+1]];
+                const p2 = layer.points[triangles[t+2]];
+                if (pointInTriangle(worldX, worldY, p0.x, p0.y, p1.x, p1.y, p2.x, p2.y)) {
+                    hit = true;
+                    break;
+                }
+            }
+
+            if (hit) {
+                if (activeLayerId !== layer.id) {
+                    onSelectLayer(layer.id);
+                }
+                setDraggedLayerId(layer.id);
+                setIsLayerDragging(true);
+                lastPanRef.current = { x: e.clientX, y: e.clientY };
+                setSelectedPointIndex(null);
+                e.stopPropagation();
+                return; 
+            }
+        }
     }
+
+    if (selectedPointIndex !== null) setSelectedPointIndex(null);
 
     setIsPanning(true);
     lastPanRef.current = { x: e.clientX, y: e.clientY };
   };
 
-  const updatePan = (e: React.MouseEvent) => {
-    if (!isPanning) return;
-    
+  const handleMouseMove = (e: React.MouseEvent) => {
     const dx = e.clientX - lastPanRef.current.x;
     const dy = e.clientY - lastPanRef.current.y;
-    
-    if (isEditingBackground && onBackgroundTransformChange) {
-        onBackgroundTransformChange({
-            ...backgroundTransform,
-            x: backgroundTransform.x + dx / transform.k,
-            y: backgroundTransform.y + dy / transform.k
-        });
-    } else {
-        setTransform(prev => ({
-            ...prev,
-            x: prev.x + dx,
-            y: prev.y + dy
-        }));
-    }
     lastPanRef.current = { x: e.clientX, y: e.clientY };
+
+    if (isLayerDragging && draggedLayerId) {
+        const layer = layers.find(l => l.id === draggedLayerId);
+        if (layer) {
+            const worldDx = dx / transform.k;
+            const worldDy = dy / transform.k;
+            const newPoints = layer.points.map(p => ({
+                ...p,
+                x: p.x + worldDx,
+                y: p.y + worldDy
+            }));
+            onUpdateLayer(layer.id, { points: newPoints });
+        }
+        return;
+    }
+
+    if (isPanning) {
+        if (isEditingBackground && onBackgroundTransformChange) {
+            onBackgroundTransformChange({
+                ...backgroundTransform,
+                x: backgroundTransform.x + dx / transform.k,
+                y: backgroundTransform.y + dy / transform.k
+            });
+        } else {
+            setTransform(prev => ({
+                ...prev,
+                x: prev.x + dx,
+                y: prev.y + dy
+            }));
+        }
+    }
   };
 
-  const endPan = () => {
+  const handleMouseUp = () => {
     setIsPanning(false);
+    setIsLayerDragging(false);
+    setDraggedLayerId(null);
   };
 
   const resetView = () => {
-    setTransform({ x: 0, y: 0, k: 1 });
+    setTransform({ x: 20, y: 20, k: 0.8 });
   };
   const zoomIn = () => setTransform(prev => ({ ...prev, k: Math.min(prev.k * 1.2, 10) }));
   const zoomOut = () => setTransform(prev => ({ ...prev, k: Math.max(prev.k / 1.2, 0.1) }));
@@ -409,17 +565,15 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
       const x = (rawX - transform.x) / transform.k;
       const y = (rawY - transform.y) / transform.k;
 
-      // Calculate UV based on barycentric or simple projection
       let u = x / containerSize.w;
       let v = y / containerSize.h;
       
-      // Try to find if inside existing triangle to get better UV
       const triangles = triangulate(activeLayer.points);
       for (let i = 0; i < triangles.length; i += 3) {
           const i0 = triangles[i]; const i1 = triangles[i+1]; const i2 = triangles[i+2];
           const p0 = activeLayer.points[i0]; const p1 = activeLayer.points[i1]; const p2 = activeLayer.points[i2];
           if (pointInTriangle(x, y, p0.x, p0.y, p1.x, p1.y, p2.x, p2.y)) {
-              const [w0, w1, w2] = getBarycentric(x, y, p0.x, p0.y, p1.x, p1.y, p2.x, p2.y);
+              const [w0, w1, w2] = getBarycentric(x, y, p0.x, p0.y, p1.x, p1.y, p2.x, p2.y,);
               u = w0 * p0.u + w1 * p1.u + w2 * p2.u;
               v = w0 * p0.v + w1 * p1.v + w2 * p2.v;
               break;
@@ -432,7 +586,7 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
       };
 
       onUpdateLayer(activeLayer.id, { points: [...activeLayer.points, newPoint] });
-      setSelectedPointIndex(activeLayer.points.length); // Index of newly added point
+      setSelectedPointIndex(activeLayer.points.length);
   };
 
   const handleDrag = (index: number, e: any, data: { x: number, y: number }) => {
@@ -454,10 +608,8 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
       setSelectedPointIndex(null);
   };
 
-  // --- Video HUD Handlers ---
   const handleVideoAction = (action: 'play' | 'pause' | 'volume' | 'seek' | 'mute', value?: number) => {
       if (!activeLayer) return;
-      
       const newPlayback = { ...activeLayer.playback };
 
       if (action === 'play') newPlayback.isPlaying = true;
@@ -467,16 +619,11 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
           newPlayback.volume = value;
           if (value > 0) newPlayback.isMuted = false;
       }
-      if (action === 'seek' && value !== undefined) {
-          newPlayback.currentTime = value;
-      }
+      if (action === 'seek' && value !== undefined) newPlayback.currentTime = value;
       
-      // We update the layer state. The sync mechanism will propagate this to the Receiver.
-      // The local effect will pick this up and apply it to the <video> element.
       onUpdateLayer(activeLayer.id, { playback: newPlayback });
   };
 
-  // --- UV Handlers ---
   const handleUVChange = (index: number, field: 'u' | 'v', rawValue: string) => {
       setEditingUV({ index, field, value: rawValue });
       const val = parseFloat(rawValue);
@@ -491,7 +638,6 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
   return (
     <div className={`relative w-full h-full bg-black overflow-hidden select-none ${isEditingBackground ? 'cursor-move' : ''}`}>
        
-       {/* Background Reference Image */}
        <div 
         className="absolute inset-0 pointer-events-none overflow-hidden"
         style={{
@@ -517,29 +663,35 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
         )}
       </div>
 
-       {/* Canvas Container */}
        <div 
         ref={containerRef}
-        className={`relative w-full h-full max-w-5xl max-h-[80vh] mx-auto z-10 overflow-hidden ring-1 ring-white/10 ${isEditingBackground ? 'ring-yellow-500/50' : ''}`}
+        className={`relative w-full h-full max-w-none mx-auto z-10 overflow-hidden ring-1 ring-white/10 ${isEditingBackground ? 'ring-yellow-500/50' : ''}`}
         onWheel={handleWheel}
-        onMouseDown={startPan}
-        onMouseMove={updatePan}
-        onMouseUp={endPan}
-        onMouseLeave={endPan}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
         onDoubleClick={handleDoubleClick}
+        style={{
+             cursor: isPanning ? 'grabbing' : (isLayerDragging ? 'move' : 'default'),
+             display: 'block' // Removed flex centering which caused offset issues
+        }}
        >
           <div
-            className="absolute top-0 left-0 w-full h-full origin-top-left will-change-transform"
+            className="will-change-transform origin-top-left absolute top-0 left-0"
             style={{
-                transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.k})`
+                width: containerSize.w,
+                height: containerSize.h,
+                transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.k})`,
+                transformOrigin: '0 0'
             }}
             >
                 <canvas 
                     ref={canvasRef}
-                    className="absolute top-0 left-0 w-full h-full block pointer-events-none"
+                    className="block pointer-events-none"
+                    style={{ width: '100%', height: '100%' }}
                 />
 
-                {/* Draggable Points (Only for Active Layer) */}
                 {!isEditingBackground && mode === AppMode.MAPPING && activeLayer && !activeLayer.locked && activeLayer.points.map((p, idx) => {
                     const nodeRef = getPointRef(p.id);
                     return (
@@ -563,7 +715,6 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
                                 >
                                     <div className={`w-1 h-1 ${selectedPointIndex === idx ? 'bg-yellow-400' : 'bg-white'} rounded-full`} />
                                 </div>
-                                {/* UV Editor */}
                                 {selectedPointIndex === idx && (
                                     <div 
                                         className="absolute top-5 left-5 bg-slate-900/95 border border-slate-600 rounded p-2 flex flex-col gap-1 shadow-2xl min-w-[80px]"
@@ -596,7 +747,6 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
                 })}
             </div>
 
-            {/* HUD Elements */}
             {!isEditingBackground && mode === AppMode.MAPPING && (
                 <div className="absolute bottom-4 left-4 flex flex-col gap-2 z-[100]" onMouseDown={e => e.stopPropagation()}>
                     <div className="bg-slate-900/80 backdrop-blur border border-slate-700 rounded-lg p-1 flex flex-col gap-1 shadow-xl">
@@ -607,7 +757,6 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
                 </div>
             )}
             
-            {/* Video Controls for Active Layer */}
             {!isEditingBackground && mode === AppMode.MAPPING && activeLayer && activeLayer.source?.type === ContentType.VIDEO && (
                  <div 
                  className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-slate-900/90 backdrop-blur border border-slate-700 rounded-lg p-2 flex items-center gap-3 shadow-2xl z-[100] min-w-[300px]"

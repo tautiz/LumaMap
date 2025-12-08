@@ -44,7 +44,8 @@ export interface Layer {
   name: string;
   visible: boolean;
   locked: boolean;
-  opacity: number;
+  opacity: number; // User defined master opacity
+  transitionOpacity?: number; // System defined fade multiplier (0-1)
   source: ProjectionSource | null;
   points: ControlPoint[];
   playback: PlaybackState;
@@ -63,4 +64,47 @@ export enum AppMode {
   SETUP = 'SETUP', // Taking photo of the wall / uploading background
   MAPPING = 'MAPPING', // Dragging corners
   LIVE = 'LIVE', // Fullscreen projection
+}
+
+// Shortcuts
+export type ShortcutAction = 'NEXT_LAYER' | 'PREV_LAYER' | 'BLACKOUT' | 'TOGGLE_UI';
+
+export type KeyMap = {
+  [action in ShortcutAction]: string;
+};
+
+// Global API Interface for external control (Console, Bluetooth Scripts, etc.)
+export interface LumaAPI {
+  /**
+   * Toggles visibility of a layer by its index (0-based, from bottom to top)
+   */
+  toggleLayerVisibility: (index: number) => void;
+  
+  /**
+   * Sets the opacity of a layer by index
+   * @param index Layer index
+   * @param opacity 0.0 to 1.0
+   */
+  setLayerOpacity: (index: number, opacity: number) => void;
+
+  /**
+   * Hides all layers immediately
+   */
+  blackout: () => void;
+
+  /**
+   * Restores visibility of all layers
+   */
+  restoreAll: () => void;
+  
+  /**
+   * Returns current layer status
+   */
+  getStatus: () => Layer[];
+}
+
+declare global {
+  interface Window {
+    LumaAPI: LumaAPI;
+  }
 }

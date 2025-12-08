@@ -1,8 +1,7 @@
-
-import React, { useState } from 'react';
-import { AppMode, ProjectionSource, ContentType, Layer, Transform } from '../types';
+import React, { useState, useEffect } from 'react';
+import { AppMode, ProjectionSource, ContentType, Layer, Transform, KeyMap, ShortcutAction } from '../types';
 import { generateTexture } from '../services/gemini';
-import { Upload, Monitor, Square, Layers, Sparkles, Move, Maximize, Image as ImageIcon, Save, FolderOpen, ExternalLink, Eye, EyeOff, Move3d, Plus, Trash2, ChevronUp, ChevronDown, Lock, Unlock } from 'lucide-react';
+import { Upload, Monitor, Square, Layers, Sparkles, Move, Maximize, Image as ImageIcon, Save, FolderOpen, ExternalLink, Eye, EyeOff, Move3d, Plus, Trash2, ChevronUp, ChevronDown, Lock, Unlock, Settings, Copy, Keyboard, X } from 'lucide-react';
 
 interface ControlPanelProps {
   mode: AppMode;
@@ -13,6 +12,7 @@ interface ControlPanelProps {
   activeLayerId: string | null;
   onAddLayer: () => void;
   onRemoveLayer: (id: string) => void;
+  onDuplicateLayer: (id: string) => void;
   onSelectLayer: (id: string) => void;
   onUpdateLayer: (id: string, updates: Partial<Layer>) => void;
   onMoveLayer: (id: string, dir: 'up' | 'down') => void;
@@ -32,6 +32,12 @@ interface ControlPanelProps {
 
   backgroundTransform: Transform;
   setBackgroundTransform: (t: Transform) => void;
+
+  projectorSize: { w: number, h: number };
+  setProjectorSize: (size: { w: number, h: number }) => void;
+
+  keyMappings: KeyMap;
+  setKeyMappings: (map: KeyMap) => void;
 }
 
 const ControlPanel: React.FC<ControlPanelProps> = ({
@@ -41,6 +47,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   activeLayerId,
   onAddLayer,
   onRemoveLayer,
+  onDuplicateLayer,
   onSelectLayer,
   onUpdateLayer,
   onMoveLayer,
@@ -55,16 +62,45 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   isEditingBackground,
   setIsEditingBackground,
   backgroundTransform,
-  setBackgroundTransform
+  setBackgroundTransform,
+  projectorSize,
+  setProjectorSize,
+  keyMappings,
+  setKeyMappings
 }) => {
   const [texturePrompt, setTexturePrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [recordingAction, setRecordingAction] = useState<ShortcutAction | null>(null);
 
   const activeLayer = layers.find(l => l.id === activeLayerId);
+
+  // Keyboard Recorder
+  useEffect(() => {
+    if (!recordingAction) return;
+
+    const handleRecordKey = (e: KeyboardEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        // Ignore modifiers on their own
+        if (['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) return;
+
+        setKeyMappings({
+            ...keyMappings,
+            [recordingAction]: e.key
+        });
+        setRecordingAction(null);
+    };
+
+    window.addEventListener('keydown', handleRecordKey);
+    return () => window.removeEventListener('keydown', handleRecordKey);
+  }, [recordingAction, keyMappings, setKeyMappings]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'BACKGROUND' | 'CONTENT') => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    e.target.value = '';
 
     if (type === 'BACKGROUND') {
       onUploadBackground(file);
@@ -102,6 +138,15 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
     }
   };
 
+  const formatKey = (key: string) => {
+      if (key === ' ') return 'Space';
+      if (key === 'ArrowRight') return 'Right';
+      if (key === 'ArrowLeft') return 'Left';
+      if (key === 'ArrowUp') return 'Up';
+      if (key === 'ArrowDown') return 'Down';
+      return key;
+  };
+
   return (
     <div className="absolute top-0 left-0 h-full w-80 bg-slate-900/95 backdrop-blur-md border-r border-slate-700 p-6 flex flex-col gap-6 shadow-2xl z-50 overflow-y-auto transition-transform">
       <div className="flex justify-between items-start">
@@ -121,7 +166,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         </div>
       </div>
 
-      {/* Mode Switcher */}
       <div className="flex bg-slate-800 p-1 rounded-lg">
         <button
           onClick={() => setMode(AppMode.SETUP)}
@@ -150,11 +194,66 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         <ExternalLink size={14} /> Open Projector Window
       </button>
 
-      {/* Setup Section */}
       {mode === AppMode.SETUP && (
         <div className="space-y-4 border-t border-slate-800 pt-4">
-          <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-            <Monitor size={16} /> Reference Setup
+          
+          {/* RESOLUTION */}
+          <div className="space-y-2">
+            <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                <Settings size={16} /> Projector Settings
+            </h2>
+            <div className="grid grid-cols-2 gap-2">
+                <div>
+                    <label className="text-[10px] text-slate-500">Resolution W</label>
+                    <input 
+                        type="number" 
+                        value={projectorSize.w} 
+                        onChange={(e) => setProjectorSize({ ...projectorSize, w: parseInt(e.target.value) || 1920 })}
+                        className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white"
+                    />
+                </div>
+                <div>
+                    <label className="text-[10px] text-slate-500">Resolution H</label>
+                    <input 
+                        type="number" 
+                        value={projectorSize.h} 
+                        onChange={(e) => setProjectorSize({ ...projectorSize, h: parseInt(e.target.value) || 1080 })}
+                        className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white"
+                    />
+                </div>
+            </div>
+          </div>
+
+          {/* KEYBOARD SHORTCUTS */}
+          <div className="space-y-2">
+              <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2 mt-4">
+                  <Keyboard size={16} /> Keyboard Controls
+              </h2>
+              <p className="text-[10px] text-slate-500 mb-2">Click button to reassign key.</p>
+              
+              <div className="space-y-2">
+                  {[
+                      { id: 'NEXT_LAYER', label: 'Next Layer (Solo)' },
+                      { id: 'PREV_LAYER', label: 'Prev Layer (Solo)' },
+                      { id: 'BLACKOUT', label: 'Blackout / Restore' },
+                      { id: 'TOGGLE_UI', label: 'Toggle Setup UI' },
+                  ].map((action) => (
+                      <div key={action.id} className="flex justify-between items-center text-xs">
+                          <span className="text-slate-400">{action.label}</span>
+                          <button 
+                            onClick={() => setRecordingAction(action.id as ShortcutAction)}
+                            className={`min-w-[60px] px-2 py-1 rounded text-center font-mono uppercase border ${recordingAction === action.id ? 'bg-cyan-900 border-cyan-500 text-white animate-pulse' : 'bg-slate-800 border-slate-700 text-cyan-400 hover:border-cyan-600'}`}
+                          >
+                              {recordingAction === action.id ? 'Press Key...' : formatKey(keyMappings[action.id as ShortcutAction])}
+                          </button>
+                      </div>
+                  ))}
+              </div>
+          </div>
+
+          {/* REFERENCE PHOTO */}
+          <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2 mt-4">
+            <Monitor size={16} /> Reference Surface
           </h2>
           
           <div className="border-2 border-dashed border-slate-700 rounded-lg p-6 flex flex-col items-center justify-center text-center hover:border-cyan-500 hover:bg-slate-800/50 transition-colors cursor-pointer relative">
@@ -165,7 +264,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
               onChange={(e) => handleFileUpload(e, 'BACKGROUND')}
             />
             <Upload className="text-slate-500 mb-2" size={24} />
-            <span className="text-sm text-slate-400">Upload Surface Photo</span>
+            <span className="text-sm text-slate-400">Upload Photo</span>
           </div>
 
           {backgroundUrl && (
@@ -232,7 +331,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         </div>
       )}
 
-      {/* Mapping Section - Layers */}
       {mode === AppMode.MAPPING && (
         <div className="space-y-4 border-t border-slate-800 pt-4">
           <div className="flex justify-between items-center">
@@ -244,7 +342,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
              </button>
           </div>
 
-          {/* Layer List */}
           <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
              {layers.slice().reverse().map((layer) => (
                  <div 
@@ -263,6 +360,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                      <div className="flex gap-1 opacity-50 hover:opacity-100">
                         <button onClick={(e) => { e.stopPropagation(); onMoveLayer(layer.id, 'up'); }}><ChevronUp size={12} /></button>
                         <button onClick={(e) => { e.stopPropagation(); onMoveLayer(layer.id, 'down'); }}><ChevronDown size={12} /></button>
+                        <button onClick={(e) => { e.stopPropagation(); onDuplicateLayer(layer.id); }} className="hover:text-cyan-400" title="Clone Layer"><Copy size={12} /></button>
                         <button onClick={(e) => { e.stopPropagation(); onRemoveLayer(layer.id); }} className="hover:text-red-400"><Trash2 size={12} /></button>
                      </div>
                  </div>
@@ -278,7 +376,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                   </button>
                </div>
                
-               {/* Name Edit */}
                <input 
                   type="text" 
                   value={activeLayer.name} 
@@ -286,7 +383,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                   className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-300 mb-2"
                />
 
-               {/* Opacity */}
                <div>
                     <label className="text-[10px] text-slate-400 block mb-1">Opacity</label>
                     <input 
@@ -297,7 +393,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                     />
                </div>
 
-                {/* Content Uploader */}
                 <div className="grid grid-cols-2 gap-2 pt-2">
                     <div className="relative border border-slate-700 bg-slate-900 rounded p-2 flex flex-col items-center hover:bg-slate-700 cursor-pointer">
                         <input type="file" accept="image/*,video/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => handleFileUpload(e, 'CONTENT')} />
@@ -313,7 +408,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                     </button>
                 </div>
 
-                {/* Gemini */}
                 <div className="pt-2 border-t border-slate-700">
                     <div className="flex gap-2 mb-2">
                         <input 
@@ -338,7 +432,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                 </div>
             </div>
           )}
-
         </div>
       )}
     </div>
