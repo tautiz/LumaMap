@@ -1,4 +1,4 @@
-import { GridSettings } from '../types';
+import { ControlPoint, GridSettings } from '../types';
 
 export const DEFAULT_GRID: GridSettings = {
   unit: 'm',
@@ -11,6 +11,7 @@ export const DEFAULT_GRID: GridSettings = {
   rows: 10,
   frame: true,
   cellsTouch: true,
+  color: '#00ff00',
 };
 
 // More cells than this would be a blur on any projector, and would only slow a Raspberry Pi down.
@@ -40,12 +41,16 @@ export const gridLayout = (g: GridSettings): GridLayout => {
 };
 
 export const gridKey = (g: GridSettings) =>
-  [g.width, g.height, g.mode, g.cellWidth, g.cellHeight, g.columns, g.rows, g.frame, g.cellsTouch].join('|');
+  [g.width, g.height, g.mode, g.cellWidth, g.cellHeight, g.columns, g.rows, g.frame, g.cellsTouch, g.color].join('|');
 
 const TEXTURE_SIZE = 1024; // Longer side, in pixels
-const BACKGROUND = '#002200';
-const LINE = '#00ff00';
-const FRAME = '#b6ffb6';
+
+const hexToRgb = (hex: string): [number, number, number] => {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  const n = m ? parseInt(m[1], 16) : 0x00ff00;
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+};
+const rgb = (c: number[]) => `rgb(${c.map(v => Math.round(v)).join(',')})`;
 
 /**
  * Draws the grid as a texture covering the element exactly once (texture coordinates 0..1),
@@ -69,9 +74,11 @@ export const drawGridTexture = (g: GridSettings): HTMLCanvasElement => {
   const line = Math.max(2, Math.min(4, Math.min(cw, ch) / 6));
   const frame = line * 2.5;
 
-  ctx.fillStyle = BACKGROUND;
+  // Lines in the chosen colour, a dark shade of it behind them and a light tint for the element's frame.
+  const lineColor = hexToRgb(g.color || DEFAULT_GRID.color!);
+  ctx.fillStyle = rgb(lineColor.map(v => v * 0.13));
   ctx.fillRect(0, 0, W, H);
-  ctx.strokeStyle = LINE;
+  ctx.strokeStyle = rgb(lineColor);
   ctx.lineWidth = line;
   ctx.beginPath();
 
@@ -103,7 +110,7 @@ export const drawGridTexture = (g: GridSettings): HTMLCanvasElement => {
   ctx.stroke();
 
   if (g.frame) {
-    ctx.strokeStyle = FRAME;
+    ctx.strokeStyle = rgb(lineColor.map(v => v + (255 - v) * 0.7));
     ctx.lineWidth = frame;
     ctx.strokeRect(frame / 2, frame / 2, W - frame, H - frame);
   }
@@ -113,3 +120,57 @@ export const drawGridTexture = (g: GridSettings): HTMLCanvasElement => {
 /** A number as people write it: up to two decimals, Lithuanian decimal comma when asked. */
 export const formatNumber = (n: number, lang: string, digits = 2) =>
   Number.isFinite(n) ? n.toLocaleString(lang, { maximumFractionDigits: digits, useGrouping: false }) : '–';
+
+// --- Element shape ---
+//
+// An element whose four corners still form an upright rectangle has not been fitted to anything yet, so it can
+// safely take the real proportions of its grid. Once someone has dragged a corner, its shape is left alone.
+
+const CORNERS = [[0, 0], [1, 0], [1, 1], [0, 1]];
+
+const cornerIndex = (points: ControlPoint[]) =>
+  CORNERS.map(([u, v]) => points.findIndex(p => p.u === u && p.v === v));
+
+export const isPlainRectangle = (points: ControlPoint[]): boolean => {
+  if (points.length !== 4) return false;
+  const [tl, tr, br, bl] = cornerIndex(points).map(i => points[i]);
+  if (!tl || !tr || !br || !bl) return false;
+  const near = (a: number, b: number) => Math.abs(a - b) < 0.5;
+  return near(tl.y, tr.y) && near(bl.y, br.y) && near(tl.x, bl.x) && near(tr.x, br.x) && tr.x > tl.x && bl.y > tl.y;
+};
+
+/**
+ * Four corners of an upright rectangle with the given width/height proportion. It keeps the centre and the
+ * area of the current corners (or sits in the middle of the projector area), and always fits inside it.
+ */
+export const proportionalPoints = (aspect: number, area: { w: number; h: number }, current?: ControlPoint[]): ControlPoint[] => {
+  let cx = area.w / 2;
+  let cy = area.h / 2;
+  let size = area.w * area.h * 0.35; // about a third of the picture
+  if (current && current.length >= 3) {
+    const xs = current.map(p => p.x);
+    const ys = current.map(p => p.y);
+    cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+    cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+    size = (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
+  }
+  const a = Number.isFinite(aspect) && aspect > 0 ? aspect : 1;
+  let w = Math.sqrt(size * a);
+  let h = w / a;
+  const fit = Math.min(1, (area.w * 0.95) / w, (area.h * 0.95) / h);
+  w *= fit;
+  h *= fit;
+  cx = Math.min(Math.max(cx, w / 2), area.w - w / 2);
+  cy = Math.min(Math.max(cy, h / 2), area.h - h / 2);
+  const ids = current && current.length === 4 ? cornerIndex(current).map(i => current[i]?.id) : [];
+  return CORNERS.map(([u, v], i) => ({
+    id: ids[i] || Math.random().toString(36).slice(2, 11),
+    x: cx + (u - 0.5) * w,
+    y: cy + (v - 0.5) * h,
+    u,
+    v,
+  }));
+};
+
+export const gridAspect = (g: GridSettings) =>
+  positive(g.width, DEFAULT_GRID.width) / positive(g.height, DEFAULT_GRID.height);
