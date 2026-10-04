@@ -18,3 +18,11 @@ View your app in AI Studio: https://ai.studio/apps/drive/1Y8KrbtcUvLYAf5MtFD_pm1
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
+
+## Deploy (GitHub Pages)
+
+`.github/workflows/deploy-pages.yml` builds and publishes the app on every push to `main`.
+One-time setup: **Settings → Pages → Build and deployment → Source: GitHub Actions**.
+The site is served at `https://<user>.github.io/LumaMap/`.
+
+The Gemini key is not included in the Pages build (it would be public), so AI texture generation is unavailable there.
