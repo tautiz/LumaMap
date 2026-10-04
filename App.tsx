@@ -6,6 +6,7 @@ import HelpDialog from './components/HelpDialog';
 import { useI18n } from './i18n';
 import { HelpCircle, Monitor, Move, Play, SlidersHorizontal } from 'lucide-react';
 import { AppMode, Layer, ControlPoint, ProjectionSource, ContentType, Transform, KeyMap, ShortcutAction } from './types';
+import { SavedProject, saveToBrowser, loadFromBrowser, exportShowFile, parseShowFile, fetchShowFile } from './services/projectStore';
 
 const CHANNEL_NAME = 'lumamap_sync_v2';
 
@@ -46,10 +47,16 @@ const DEFAULT_KEY_MAP: KeyMap = {
 
 const App: React.FC = () => {
   const { t } = useI18n();
-  const isReceiver = new URLSearchParams(window.location.search).get('live') === 'true';
+  const params = new URLSearchParams(window.location.search);
+  const isReceiver = params.get('live') === 'true';
+  // Show mode (?show or ?show=<file.lumamap>): open a saved show and project it straight away, no controls.
+  const isShow = !isReceiver && params.has('show');
+  const showSource = params.get('show') || '';
 
-  const [mode, setMode] = useState<AppMode>(isReceiver ? AppMode.LIVE : AppMode.SETUP);
+  const [mode, setMode] = useState<AppMode>(isReceiver || isShow ? AppMode.LIVE : AppMode.SETUP);
+  const [showStatus, setShowStatus] = useState<'loading' | 'ready' | 'missing' | 'retrying'>('loading');
   const [backgroundUrl, setBackgroundUrl] = useState<string | null>(null);
+  const [backgroundFile, setBackgroundFile] = useState<Blob | null>(null);
   const [showBackgroundInLive, setShowBackgroundInLive] = useState(false);
   
   const [backgroundTransform, setBackgroundTransform] = useState<Transform>({ x: 0, y: 0, k: 1 });
@@ -68,7 +75,7 @@ const App: React.FC = () => {
 
   // Initial Layer Creation
   useEffect(() => {
-    if (layers.length === 0 && !isReceiver) {
+    if (layers.length === 0 && !isReceiver && !isShow) {
         const initialLayer = createLayer(t('map.layers.defaultName', { n: 1 }), projectorSize.w, projectorSize.h, {
             type: ContentType.SOLID_COLOR,
             url: '',
@@ -86,7 +93,7 @@ const App: React.FC = () => {
   // When the panel is hidden (e.g. during the show), reveal a "show controls" button on mouse move.
   const [showRevealButton, setShowRevealButton] = useState(false);
   useEffect(() => {
-    if (isReceiver || uiVisible) return;
+    if (isReceiver || isShow || uiVisible) return;
     let timer: number | undefined;
     const onMove = () => {
       setShowRevealButton(true);
@@ -453,7 +460,7 @@ const App: React.FC = () => {
                 });
                 break;
             case 'TOGGLE_UI':
-                 if (!isReceiver) setUiVisible(prev => !prev);
+                 if (!isReceiver && !isShow) setUiVisible(prev => !prev);
                  break;
         }
 
@@ -477,6 +484,7 @@ const App: React.FC = () => {
   const handleUploadBackground = (file: File) => {
     const url = URL.createObjectURL(file);
     setBackgroundUrl(url);
+    setBackgroundFile(file);
     setBackgroundTransform({ x: 0, y: 0, k: 1 });
   };
 
@@ -494,24 +502,29 @@ const App: React.FC = () => {
       window.open(window.location.href.split('?')[0] + '?live=true', 'LumaMapLive', features);
   };
 
-  const handleSave = () => {
-    const safeLayers = layers.map(l => ({
-        ...l,
-        source: l.source && l.source.url.startsWith('blob:') 
-            ? { ...l.source, url: '', file: undefined }
-            : l.source
-    }));
-    
-    const data = {
-      version: 2,
-      layers: safeLayers,
-      backgroundTransform,
-      projectorSize,
-      keyMappings
-    };
+  const currentProject = (): SavedProject => ({
+    layers,
+    backgroundFile,
+    backgroundTransform,
+    showBackgroundInLive,
+    projectorSize,
+    keyMappings,
+  });
 
+  const applyProject = (project: SavedProject) => {
+    setProjectorSize(project.projectorSize);
+    setLayers(project.layers);
+    setActiveLayerId(project.layers[0]?.id ?? null);
+    setBackgroundTransform(project.backgroundTransform);
+    setShowBackgroundInLive(project.showBackgroundInLive);
+    setBackgroundFile(project.backgroundFile);
+    setBackgroundUrl(project.backgroundFile ? URL.createObjectURL(project.backgroundFile) : null);
+    if (project.keyMappings) setKeyMappings(project.keyMappings);
+  };
+
+  const handleSave = async () => {
     try {
-      localStorage.setItem('lumaMapProject', JSON.stringify(data));
+      await saveToBrowser(currentProject());
       alert(t('alert.saved'));
     } catch (e) {
       console.error("Save failed", e);
@@ -519,28 +532,14 @@ const App: React.FC = () => {
     }
   };
 
-  const handleLoad = () => {
-    const json = localStorage.getItem('lumaMapProject');
-    if (!json) {
-      alert(t('alert.noSaved'));
-      return;
-    }
-
+  const handleLoad = async () => {
     try {
-      const data = JSON.parse(json);
-      if (data.projectorSize) {
-        setProjectorSize(data.projectorSize);
+      const project = await loadFromBrowser();
+      if (!project) {
+        alert(t('alert.noSaved'));
+        return;
       }
-      if (data.layers) {
-        setLayers(data.layers);
-        if (data.layers.length > 0) setActiveLayerId(data.layers[0].id);
-      }
-      if (data.backgroundTransform) {
-        setBackgroundTransform(data.backgroundTransform);
-      }
-      if (data.keyMappings) {
-        setKeyMappings(data.keyMappings);
-      }
+      applyProject(project);
       alert(t('alert.loaded'));
     } catch (e) {
       console.error("Load failed", e);
@@ -548,11 +547,70 @@ const App: React.FC = () => {
     }
   };
 
+  const handleExport = () => {
+    const url = URL.createObjectURL(exportShowFile(currentProject()));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'lumamap-show.lumamap';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const handleImport = async (file: File) => {
+    try {
+      applyProject(parseShowFile(await file.arrayBuffer()));
+      alert(t('alert.loaded'));
+    } catch (e) {
+      console.error("Import failed", e);
+      alert(t('alert.loadFailed'));
+    }
+  };
+
+  const showLink = window.location.href.split('?')[0] + '?show';
+
+  // Show mode: load the show on start. A show file from the network is retried until it arrives,
+  // because right after power-on the Wi-Fi may not be up yet.
+  useEffect(() => {
+    if (!isShow) return;
+    let cancelled = false;
+    let timer: number | undefined;
+    const attempt = async () => {
+      try {
+        const project = showSource ? await fetchShowFile(showSource) : await loadFromBrowser();
+        if (cancelled) return;
+        if (project) {
+          applyProject(project);
+          setShowStatus('ready');
+        } else {
+          setShowStatus('missing');
+        }
+      } catch (e) {
+        console.error("Show load failed, retrying", e);
+        if (cancelled) return;
+        setShowStatus('retrying');
+        timer = window.setTimeout(attempt, 5000);
+      }
+    };
+    attempt();
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [isShow, showSource]);
+
+  // Keep the screen from sleeping during an unattended show.
+  useEffect(() => {
+    if (!isShow || !('wakeLock' in navigator)) return;
+    let lock: WakeLockSentinel | null = null;
+    const request = () => navigator.wakeLock.request('screen').then(l => { lock = l; }).catch(() => {});
+    const onVisible = () => { if (document.visibilityState === 'visible') request(); };
+    request();
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { document.removeEventListener('visibilitychange', onVisible); lock?.release(); };
+  }, [isShow]);
+
   const shouldShowBackground = !!backgroundUrl && ((!isReceiver && mode !== AppMode.LIVE) || showBackgroundInLive);
 
   return (
-    <div className="w-screen h-screen bg-black overflow-hidden flex items-center justify-center">
-      {!isReceiver && uiVisible && (
+    <div className={`w-screen h-screen bg-black overflow-hidden flex items-center justify-center ${isShow ? 'cursor-none' : ''}`}>
+      {!isReceiver && !isShow && uiVisible && (
         <ControlPanel
           mode={mode}
           setMode={setMode}
@@ -571,6 +629,9 @@ const App: React.FC = () => {
           onUploadBackground={handleUploadBackground}
           onSave={handleSave}
           onLoad={handleLoad}
+          onExport={handleExport}
+          onImport={handleImport}
+          showLink={showLink}
           onOpenLive={handleOpenLive}
           onOpenHelp={() => setHelpOpen(true)}
           
@@ -590,7 +651,7 @@ const App: React.FC = () => {
         />
       )}
 
-      <main className={`relative transition-all duration-300 h-full bg-slate-900 ${(uiVisible && !isReceiver) ? 'ml-96 w-[calc(100%-24rem)]' : 'ml-0 w-full'}`}>
+      <main className={`relative transition-all duration-300 h-full bg-slate-900 ${(uiVisible && !isReceiver && !isShow) ? 'ml-96 w-[calc(100%-24rem)]' : 'ml-0 w-full'}`}>
         <SurfaceCanvas
           mode={mode}
           backgroundUrl={shouldShowBackground ? backgroundUrl : null}
@@ -641,13 +702,21 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {!isReceiver && !uiVisible && (
+        {!isReceiver && !isShow && !uiVisible && (
           <button
             onClick={() => setUiVisible(true)}
             className={`absolute top-4 left-4 z-[200] flex items-center gap-2 px-4 py-2 rounded-full bg-slate-900/90 border border-slate-600 text-white text-sm font-semibold shadow-xl transition-opacity duration-300 ${showRevealButton ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
           >
             <SlidersHorizontal size={16} /> {t('live.showControls')}
           </button>
+        )}
+
+        {isShow && showStatus !== 'ready' && (
+            <div className="absolute inset-0 flex items-center justify-center p-8 pointer-events-none z-[200]">
+                <p className="text-white/60 text-2xl text-center max-w-2xl">
+                    {t(showStatus === 'loading' ? 'show.loading' : showStatus === 'retrying' ? 'show.retrying' : 'show.missing')}
+                </p>
+            </div>
         )}
 
         {isReceiver && (

@@ -8,6 +8,12 @@ This contains everything you need to run your app locally.
 
 View your app in AI Studio: https://ai.studio/apps/drive/1Y8KrbtcUvLYAf5MtFD_pm1U25GKpZSNh
 
+## Automatic show
+
+Open `?show` to start the saved show full screen with no controls, or `?show=<file>.lumamap` to load a show file
+from a URL. To make a projector start the show at power-on, see
+[docs/automatinis-pasirodymas.md](docs/automatinis-pasirodymas.md) (Lithuanian) and `scripts/raspberry-pi-kiosk.sh`.
+
 ## Run Locally
 
 **Prerequisites:**  Node.js
