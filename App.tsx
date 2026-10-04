@@ -5,7 +5,8 @@ import SurfaceCanvas from './components/SurfaceCanvas';
 import HelpDialog from './components/HelpDialog';
 import { useI18n } from './i18n';
 import { HelpCircle, Monitor, Move, Play, SlidersHorizontal } from 'lucide-react';
-import { AppMode, Layer, ControlPoint, ProjectionSource, ContentType, Transform, KeyMap, ShortcutAction } from './types';
+import { AppMode, Layer, ControlPoint, ProjectionSource, ContentType, Transform, KeyMap, ShortcutAction, GridSettings } from './types';
+import { DEFAULT_GRID } from './utils/grid';
 import { playlistStep } from './services/mediaLibrary';
 import { SavedProject, saveToBrowser, loadFromBrowser, exportShowFile, parseShowFile, fetchShowFile } from './services/projectStore';
 
@@ -43,7 +44,8 @@ const DEFAULT_KEY_MAP: KeyMap = {
   'NEXT_LAYER': 'ArrowRight',
   'PREV_LAYER': 'ArrowLeft',
   'BLACKOUT': '0',
-  'TOGGLE_UI': 'h'
+  'TOGGLE_UI': 'h',
+  'TOGGLE_FRAME': 'r'
 };
 
 const App: React.FC = () => {
@@ -70,6 +72,11 @@ const App: React.FC = () => {
   const [activeLayerId, setActiveLayerId] = useState<string | null>(null);
   
   const [keyMappings, setKeyMappings] = useState<KeyMap>(DEFAULT_KEY_MAP);
+
+  // Grid for every element that has no grid of its own.
+  const [gridDefaults, setGridDefaults] = useState<GridSettings>(DEFAULT_GRID);
+  // LIVE: frame around the whole picture, to see where the projector's picture ends. Not saved with the show.
+  const [showProjectorFrame, setShowProjectorFrame] = useState(false);
 
   // Animation Refs
   const transitionRef = useRef<number | null>(null);
@@ -245,7 +252,9 @@ const App: React.FC = () => {
       bgId: backgroundFile ? mediaIdOf(backgroundFile) : undefined,
       bgTransform: backgroundTransform,
       showBg: showBackgroundInLive,
-      projSize: projectorSize
+      projSize: projectorSize,
+      gridDefaults,
+      projectorFrame: showProjectorFrame
     };
   };
   // Always the latest state, also inside long-lived listeners (the old handler answered with the first render's state).
@@ -280,11 +289,13 @@ const App: React.FC = () => {
 
       if (isReceiver) {
         if (type === 'SYNC') {
-            const { layers: normLayers, bgUrl, bgFile, bgId, bgTransform, showBg, projSize } = payload;
+            const { layers: normLayers, bgUrl, bgFile, bgId, bgTransform, showBg, projSize, gridDefaults: grid, projectorFrame } = payload;
             setReceiverConnected(true);
             setReceiverFallback('none');
 
             if (projSize) setProjectorSize(projSize);
+            if (grid) setGridDefaults(grid);
+            setShowProjectorFrame(!!projectorFrame);
 
             const usedIds = new Set<string>();
             if (bgId) usedIds.add(bgId);
@@ -358,7 +369,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
       scheduleSync();
-  }, [layers, scheduleSync, backgroundUrl, backgroundFile, backgroundTransform, showBackgroundInLive, projectorSize]);
+  }, [layers, scheduleSync, backgroundUrl, backgroundFile, backgroundTransform, showBackgroundInLive, projectorSize, gridDefaults, showProjectorFrame]);
 
   // Control window: report where its videos are, once a second.
   useEffect(() => {
@@ -615,6 +626,9 @@ const App: React.FC = () => {
             case 'TOGGLE_UI':
                  if (!isReceiver && !isShow) setUiVisible(prev => !prev);
                  break;
+            case 'TOGGLE_FRAME':
+                 if (mode === AppMode.LIVE) setShowProjectorFrame(prev => !prev);
+                 break;
         }
 
         if (mode === AppMode.SETUP && key === 'Escape') {
@@ -689,6 +703,7 @@ const App: React.FC = () => {
     showBackgroundInLive,
     projectorSize,
     keyMappings,
+    gridDefaults,
   });
 
   const applyProject = (project: SavedProject) => {
@@ -699,7 +714,9 @@ const App: React.FC = () => {
     setShowBackgroundInLive(project.showBackgroundInLive);
     setBackgroundFile(project.backgroundFile);
     setBackgroundUrl(project.backgroundFile ? URL.createObjectURL(project.backgroundFile) : null);
-    if (project.keyMappings) setKeyMappings(project.keyMappings);
+    // Older shows were saved before some shortcuts existed; those keep their default key.
+    if (project.keyMappings) setKeyMappings({ ...DEFAULT_KEY_MAP, ...project.keyMappings });
+    setGridDefaults(project.gridDefaults ?? DEFAULT_GRID);
   };
 
   const handleSave = async () => {
@@ -831,6 +848,11 @@ const App: React.FC = () => {
 
           keyMappings={keyMappings}
           setKeyMappings={setKeyMappings}
+
+          gridDefaults={gridDefaults}
+          setGridDefaults={setGridDefaults}
+          showProjectorFrame={showProjectorFrame}
+          setShowProjectorFrame={setShowProjectorFrame}
         />
       )}
 
@@ -853,6 +875,8 @@ const App: React.FC = () => {
           projectorSize={projectorSize}
           videoRegistry={videoRegistry}
           onVideoEnded={handleVideoEnded}
+          gridDefaults={gridDefaults}
+          showProjectorFrame={showProjectorFrame}
         />
         
         {!isReceiver && mode === AppMode.SETUP && !backgroundUrl && !welcomeDismissed && (

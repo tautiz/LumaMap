@@ -1,6 +1,7 @@
 
 import React, { useRef, useEffect, useState } from 'react';
-import { ControlPoint, ContentType, AppMode, Transform, Layer } from '../types';
+import { ControlPoint, ContentType, AppMode, Transform, Layer, GridSettings } from '../types';
+import { DEFAULT_GRID, drawGridTexture, gridKey } from '../utils/grid';
 import { triangulate, solveAffine, getBarycentric, pointInTriangle } from '../utils/math';
 import Draggable from 'react-draggable';
 import { useI18n } from '../i18n';
@@ -32,6 +33,12 @@ interface SurfaceCanvasProps {
 
   // Called when a layer's video reaches its end (only videos that do not loop by themselves, see videoLoops).
   onVideoEnded?: (layerId: string) => void;
+
+  // Grid used by elements that have no grid of their own.
+  gridDefaults?: GridSettings;
+
+  // LIVE: draw a frame around the whole picture, to see where the projector's picture ends.
+  showProjectorFrame?: boolean;
 }
 
 const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
@@ -47,7 +54,9 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
   isEditingBackground = false,
   projectorSize,
   videoRegistry,
-  onVideoEnded
+  onVideoEnded,
+  gridDefaults = DEFAULT_GRID,
+  showProjectorFrame = false
 }) => {
   const { t } = useI18n();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -62,7 +71,8 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
   const lastSeekRef = useRef<Map<string, string>>(new Map());
   // Set when the picture must be redrawn (see the render loop).
   const dirtyRef = useRef(true);
-  const gridCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  // Grid textures by settings, so each grid is drawn once and not on every frame.
+  const gridTexturesRef = useRef<Map<string, HTMLCanvasElement>>(new Map());
 
   // Global Pan and Zoom State (Camera)
   const [transform, setTransform] = useState({ x: 20, y: 20, k: 0.8 }); // Start slightly zoomed out and padded
@@ -179,28 +189,6 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
     });
   }, [layers, videoCache, imageCache, onUpdateLayer]);
 
-  useEffect(() => {
-      if (!gridCanvasRef.current) {
-          const c = document.createElement('canvas');
-          c.width = 512;
-          c.height = 512;
-          const ctx = c.getContext('2d');
-          if (ctx) {
-              ctx.fillStyle = '#002200';
-              ctx.fillRect(0,0,512,512);
-              ctx.strokeStyle = '#00ff00';
-              ctx.lineWidth = 2;
-              ctx.beginPath();
-              for(let i=0; i<=512; i+=50) {
-                  ctx.moveTo(i, 0); ctx.lineTo(i, 512);
-                  ctx.moveTo(0, i); ctx.lineTo(512, i);
-              }
-              ctx.stroke();
-          }
-          gridCanvasRef.current = c;
-      }
-  }, []);
-
   // Handle Resize and Resolution
   useEffect(() => {
     const updateSize = () => {
@@ -228,9 +216,9 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
   // torn down and restarted on every state change, and it only redraws when something changed or a
   // video is on screen. Both matter on a Raspberry Pi: a still picture costs no GPU time at all.
 
-  const sceneRef = useRef({ layers, activeLayer, mode, k: transform.k, isEditingBackground, containerSize });
-  sceneRef.current = { layers, activeLayer, mode, k: transform.k, isEditingBackground, containerSize };
-  useEffect(() => { dirtyRef.current = true; }, [layers, activeLayer, mode, transform.k, isEditingBackground, containerSize]);
+  const sceneRef = useRef({ layers, activeLayer, mode, k: transform.k, isEditingBackground, containerSize, gridDefaults, showProjectorFrame });
+  sceneRef.current = { layers, activeLayer, mode, k: transform.k, isEditingBackground, containerSize, gridDefaults, showProjectorFrame };
+  useEffect(() => { dirtyRef.current = true; }, [layers, activeLayer, mode, transform.k, isEditingBackground, containerSize, gridDefaults, showProjectorFrame]);
 
   useEffect(() => {
     let animationFrameId: number;
@@ -243,7 +231,7 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
       animationFrameId = requestAnimationFrame(render);
       if (!canvas || !ctx) return;
 
-      const { layers, activeLayer, mode, k, isEditingBackground, containerSize } = sceneRef.current;
+      const { layers, activeLayer, mode, k, isEditingBackground, containerSize, gridDefaults, showProjectorFrame } = sceneRef.current;
       const hasVideo = layers.some(l => l.visible && l.source?.type === ContentType.VIDEO);
       if (!dirtyRef.current && !hasVideo) return;
       dirtyRef.current = false;
@@ -305,10 +293,19 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
                   texW = img.naturalWidth;
                   texH = img.naturalHeight;
               }
-          } else if (layer.source.type === ContentType.SOLID_COLOR && gridCanvasRef.current) {
-              texture = gridCanvasRef.current;
-              texW = 512;
-              texH = 512;
+          } else if (layer.source.type === ContentType.SOLID_COLOR) {
+              const grid = layer.grid ?? gridDefaults;
+              const key = gridKey(grid);
+              let canvas = gridTexturesRef.current.get(key);
+              if (!canvas) {
+                  // Keep only a handful: while someone types new sizes, old grids are not needed again.
+                  if (gridTexturesRef.current.size > 16) gridTexturesRef.current.clear();
+                  canvas = drawGridTexture(grid);
+                  gridTexturesRef.current.set(key, canvas);
+              }
+              texture = canvas;
+              texW = canvas.width;
+              texH = canvas.height;
           }
 
           if (texture) {
@@ -413,6 +410,19 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
           ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
           ctx.font = '12px monospace';
           ctx.fillText(`BOUNDS: ${w}x${h}`, 10, 20);
+          ctx.restore();
+      }
+
+      // Projector edges (LIVE, when switched on): a bright frame along the very edge of the picture.
+      if (mode === AppMode.LIVE && showProjectorFrame) {
+          ctx.save();
+          ctx.globalAlpha = 1;
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 6;
+          ctx.strokeRect(3, 3, w - 6, h - 6);
+          ctx.strokeStyle = '#ff2d55';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(9, 9, w - 18, h - 18);
           ctx.restore();
       }
 
