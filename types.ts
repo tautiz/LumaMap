@@ -1,3 +1,4 @@
+import type { EffectInstance } from './effects/types';
 
 export interface Point {
   x: number;
@@ -17,6 +18,7 @@ export enum ContentType {
   IMAGE = 'IMAGE',
   SOLID_COLOR = 'SOLID_COLOR', // The green grid (name kept so saved shows still open)
   COLOR = 'COLOR', // One plain colour, see ProjectionSource.color
+  GRADIENT = 'GRADIENT', // From `color` to `color2` at `angle`
 }
 
 export interface ProjectionSource {
@@ -24,7 +26,9 @@ export interface ProjectionSource {
   url: string; // Blob URL or remote URL
   name: string;
   file?: File; // Raw file object for syncing across tabs
-  color?: string; // '#rrggbb', for ContentType.COLOR
+  color?: string; // '#rrggbb', for ContentType.COLOR and the first colour of ContentType.GRADIENT
+  color2?: string; // Second colour of ContentType.GRADIENT
+  angle?: number; // Gradient direction in degrees (0 = left to right)
 }
 
 // Several videos played one after another on the same layer. The layer's `source` is always items[index].
@@ -76,6 +80,9 @@ export interface Layer {
   points: ControlPoint[];
   playback: PlaybackState;
   grid?: GridSettings | null; // This element's own grid; when empty the project's default grid is used
+  // Effects drawn with or without content, in order (effects/). The content itself is never changed.
+  effects?: EffectInstance[];
+  color?: string; // The element's colour, followed by effects set to "element colour" (plain colour content uses its own)
 }
 
 export interface ProjectorState {
@@ -94,7 +101,7 @@ export enum AppMode {
 }
 
 // Shortcuts
-export type ShortcutAction = 'NEXT_LAYER' | 'PREV_LAYER' | 'BLACKOUT' | 'TOGGLE_UI' | 'TOGGLE_FRAME';
+export type ShortcutAction = 'NEXT_LAYER' | 'PREV_LAYER' | 'BLACKOUT' | 'TOGGLE_UI' | 'TOGGLE_FRAME' | 'TRIGGER_FX';
 
 export type KeyMap = {
   [action in ShortcutAction]: string;
@@ -124,6 +131,12 @@ export interface LumaAPI {
    */
   restoreAll: () => void;
   
+  /**
+   * Starts the effects set to run "on a signal" (flash, shockwave, explosion...).
+   * @param index Layer index; without it, every visible layer
+   */
+  triggerEffects: (index?: number) => void;
+
   /**
    * Returns current layer status
    */

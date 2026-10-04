@@ -8,6 +8,7 @@ import { HelpCircle, Monitor, Move, Play, SlidersHorizontal } from 'lucide-react
 import { AppMode, Layer, ControlPoint, ProjectionSource, ContentType, Transform, KeyMap, ShortcutAction, GridSettings } from './types';
 import { DEFAULT_GRID, gridAspect, isPlainRectangle, proportionalPoints } from './utils/grid';
 import { playlistStep } from './services/mediaLibrary';
+import { fireSignals, newId } from './effects';
 import { SavedProject, saveToBrowser, loadFromBrowser, exportShowFile, parseShowFile, fetchShowFile } from './services/projectStore';
 
 const CHANNEL_NAME = 'lumamap_sync_v2';
@@ -45,7 +46,8 @@ const DEFAULT_KEY_MAP: KeyMap = {
   'PREV_LAYER': 'ArrowLeft',
   'BLACKOUT': '0',
   'TOGGLE_UI': 'h',
-  'TOGGLE_FRAME': 'r'
+  'TOGGLE_FRAME': 'r',
+  'TRIGGER_FX': 't'
 };
 
 const App: React.FC = () => {
@@ -160,7 +162,9 @@ const App: React.FC = () => {
         })),
         // Shallow copy source is fine, but if it's an object make sure it's new ref
         source: original.source ? { ...original.source } : null,
-        playback: { ...original.playback }
+        playback: { ...original.playback },
+        // New effect ids too, so the copy's sparks do not move in step with the original's
+        effects: original.effects?.map(e => ({ ...e, id: newId() }))
     };
 
     setLayers(prev => {
@@ -479,6 +483,9 @@ const App: React.FC = () => {
       restoreAll: () => {
         setLayers(prev => prev.map(l => ({ ...l, visible: true })));
       },
+      triggerEffects: (index?: number) => {
+        setLayers(prev => fireSignals(prev, l => (index === undefined ? l.visible : prev[index]?.id === l.id)));
+      },
       getStatus: () => layers
     };
 
@@ -635,6 +642,9 @@ const App: React.FC = () => {
                  break;
             case 'TOGGLE_FRAME':
                  if (mode === AppMode.LIVE) setShowProjectorFrame(prev => !prev);
+                 break;
+            case 'TRIGGER_FX':
+                 window.LumaAPI.triggerEffects();
                  break;
         }
 

@@ -111,6 +111,7 @@ const HelpDialog: React.FC<HelpDialogProps> = ({ keyMappings, onClose }) => {
               <Row what={<Kbd>{formatKey(keyMappings.BLACKOUT, t)}</Kbd>} does={t('setup.keys.blackout')} />
               <Row what={<Kbd>{formatKey(keyMappings.TOGGLE_UI, t)}</Kbd>} does={t('setup.keys.toggleUi')} />
               <Row what={<Kbd>{formatKey(keyMappings.TOGGLE_FRAME, t)}</Kbd>} does={t('setup.keys.toggleFrame')} />
+              <Row what={<Kbd>{formatKey(keyMappings.TRIGGER_FX, t)}</Kbd>} does={t('setup.keys.trigger')} />
               <Row what={<><Kbd>1</Kbd>…<Kbd>9</Kbd></>} does={t('help.keys.numbersDo')} />
               <Row what={<><Kbd>←</Kbd><Kbd>↑</Kbd><Kbd>↓</Kbd><Kbd>→</Kbd></>} does={t('help.keys.nudgeDo')} />
               <Row what={<><Kbd>Shift</Kbd>+<Kbd>←↑↓→</Kbd></>} does={t('help.keys.shiftDo')} />
