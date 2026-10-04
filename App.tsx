@@ -6,7 +6,7 @@ import HelpDialog from './components/HelpDialog';
 import { useI18n } from './i18n';
 import { HelpCircle, Monitor, Move, Play, SlidersHorizontal } from 'lucide-react';
 import { AppMode, Layer, ControlPoint, ProjectionSource, ContentType, Transform, KeyMap, ShortcutAction, GridSettings } from './types';
-import { DEFAULT_GRID } from './utils/grid';
+import { DEFAULT_GRID, gridAspect, isPlainRectangle, proportionalPoints } from './utils/grid';
 import { playlistStep } from './services/mediaLibrary';
 import { SavedProject, saveToBrowser, loadFromBrowser, exportShowFile, parseShowFile, fetchShowFile } from './services/projectStore';
 
@@ -84,11 +84,7 @@ const App: React.FC = () => {
   // Initial Layer Creation
   useEffect(() => {
     if (layers.length === 0 && !isReceiver && !isShow) {
-        const initialLayer = createLayer(t('map.layers.defaultName', { n: 1 }), projectorSize.w, projectorSize.h, {
-            type: ContentType.SOLID_COLOR,
-            url: '',
-            name: 'Grid Pattern'
-        });
+        const initialLayer = createGridLayer(t('map.layers.defaultName', { n: 1 }));
         setLayers([initialLayer]);
         setActiveLayerId(initialLayer.id);
     }
@@ -119,21 +115,32 @@ const App: React.FC = () => {
   const canvasDims = useRef({ w: 2363, h: 1320 });
   const channelRef = useRef<BroadcastChannel | null>(null);
 
+  // A new layer shows the default grid, in the real proportions of the default element size.
+  function createGridLayer(name: string): Layer {
+    return {
+      ...createLayer(name, projectorSize.w, projectorSize.h, { type: ContentType.SOLID_COLOR, url: '', name: 'Grid Pattern' }),
+      points: proportionalPoints(gridAspect(gridDefaults), projectorSize),
+    };
+  }
+
+  // Changing the default grid also reshapes the grid layers that use it and have not been fitted yet.
+  const changeGridDefaults = (next: GridSettings) => {
+    const aspectChanged = gridAspect(next) !== gridAspect(gridDefaults);
+    setGridDefaults(next);
+    if (!aspectChanged) return;
+    setLayers(prev => prev.map(l =>
+      !l.grid && l.source?.type === ContentType.SOLID_COLOR && isPlainRectangle(l.points)
+        ? { ...l, points: proportionalPoints(gridAspect(next), projectorSize, l.points) }
+        : l
+    ));
+  };
+
   const updateLayer = (id: string, updates: Partial<Layer>) => {
     setLayers(prev => prev.map(l => l.id === id ? { ...l, ...updates } : l));
   };
 
   const addLayer = () => {
-    const newLayer = createLayer(
-        t('map.layers.defaultName', { n: layers.length + 1 }),
-        projectorSize.w, 
-        projectorSize.h,
-        {
-            type: ContentType.SOLID_COLOR,
-            url: '',
-            name: 'New Grid'
-        }
-    );
+    const newLayer = createGridLayer(t('map.layers.defaultName', { n: layers.length + 1 }));
     setLayers(prev => [...prev, newLayer]);
     setActiveLayerId(newLayer.id);
   };
@@ -850,7 +857,7 @@ const App: React.FC = () => {
           setKeyMappings={setKeyMappings}
 
           gridDefaults={gridDefaults}
-          setGridDefaults={setGridDefaults}
+          setGridDefaults={changeGridDefaults}
           showProjectorFrame={showProjectorFrame}
           setShowProjectorFrame={setShowProjectorFrame}
         />

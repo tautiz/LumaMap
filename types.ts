@@ -15,7 +15,8 @@ export interface ControlPoint {
 export enum ContentType {
   VIDEO = 'VIDEO',
   IMAGE = 'IMAGE',
-  SOLID_COLOR = 'SOLID_COLOR',
+  SOLID_COLOR = 'SOLID_COLOR', // The green grid (name kept so saved shows still open)
+  COLOR = 'COLOR', // One plain colour, see ProjectionSource.color
 }
 
 export interface ProjectionSource {
@@ -23,6 +24,7 @@ export interface ProjectionSource {
   url: string; // Blob URL or remote URL
   name: string;
   file?: File; // Raw file object for syncing across tabs
+  color?: string; // '#rrggbb', for ContentType.COLOR
 }
 
 // Several videos played one after another on the same layer. The layer's `source` is always items[index].
@@ -59,6 +61,7 @@ export interface GridSettings {
   rows: number; // used in 'count' mode
   frame: boolean; // Draw a frame around the whole element
   cellsTouch: boolean; // true: neighbouring cells share one line; false: every cell has its own frame with a gap
+  color?: string; // Line colour '#rrggbb' (default green); the background and frame are worked out from it
 }
 
 export interface Layer {

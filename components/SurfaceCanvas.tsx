@@ -223,7 +223,8 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
   useEffect(() => {
     let animationFrameId: number;
     const canvas = canvasRef.current;
-    const ctx = canvas?.getContext('2d', { alpha: false });
+    // Transparent where nothing is drawn, so the wall photo underneath shows through.
+    const ctx = canvas?.getContext('2d');
     // Patterns of still textures (pictures, the grid) are made once; a video needs a new one every frame.
     const staticPatterns = new WeakMap<CanvasImageSource, CanvasPattern | null>();
 
@@ -252,8 +253,7 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
       // Everything below is in logical (projector) pixels.
       ctx.setTransform(s, 0, 0, s, 0, 0);
       ctx.globalAlpha = 1;
-      ctx.fillStyle = '#000000';
-      ctx.fillRect(0, 0, w, h);
+      ctx.clearRect(0, 0, w, h);
 
       // Render layers
       layers.forEach(layer => {
@@ -293,6 +293,21 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
                   texW = img.naturalWidth;
                   texH = img.naturalHeight;
               }
+          } else if (layer.source.type === ContentType.COLOR) {
+              // A plain colour needs no texture: fill all triangles as one shape, so there are no seams between them.
+              ctx.fillStyle = layer.source.color || '#ffffff';
+              ctx.beginPath();
+              for (let i = 0; i < triangles.length; i += 3) {
+                  const p0 = layer.points[triangles[i]];
+                  const p1 = layer.points[triangles[i + 1]];
+                  const p2 = layer.points[triangles[i + 2]];
+                  if (!p0 || !p1 || !p2) continue;
+                  ctx.moveTo(p0.x, p0.y);
+                  ctx.lineTo(p1.x, p1.y);
+                  ctx.lineTo(p2.x, p2.y);
+                  ctx.closePath();
+              }
+              ctx.fill('nonzero');
           } else if (layer.source.type === ContentType.SOLID_COLOR) {
               const grid = layer.grid ?? gridDefaults;
               const key = gridKey(grid);
@@ -638,12 +653,37 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
     });
   };
 
-  // Start the editor with everything in view (the live projector keeps its own framing).
+  // Start the editor with everything in view.
   const hasFittedRef = useRef(false);
   useEffect(() => {
     if (hasFittedRef.current || mode === AppMode.LIVE) return;
     hasFittedRef.current = true;
     resetView();
+  }, [mode, containerSize]);
+
+  // LIVE: the projector area fills the window exactly (centred, no margins), so the editor's LIVE view and
+  // the projector window show the same picture whatever their size. Leaving LIVE fits the editor view again.
+  const wasLiveRef = useRef(false);
+  useEffect(() => {
+    if (mode !== AppMode.LIVE) {
+        if (!wasLiveRef.current) return;
+        wasLiveRef.current = false;
+        const timer = window.setTimeout(resetView, 350); // after the panel has slid back in
+        return () => window.clearTimeout(timer);
+    }
+    wasLiveRef.current = true;
+    const fit = () => {
+        const el = containerRef.current;
+        if (!el || !el.clientWidth || !el.clientHeight) return;
+        const k = Math.min(el.clientWidth / containerSize.w, el.clientHeight / containerSize.h);
+        setTransform({ x: (el.clientWidth - containerSize.w * k) / 2, y: (el.clientHeight - containerSize.h * k) / 2, k });
+    };
+    fit();
+    // The panel slides away on entering LIVE, so measure again once the layout has settled.
+    const timer = window.setTimeout(fit, 350);
+    const observer = new ResizeObserver(fit);
+    if (containerRef.current) observer.observe(containerRef.current);
+    return () => { window.clearTimeout(timer); observer.disconnect(); };
   }, [mode, containerSize]);
   const zoomIn = () => setTransform(prev => ({ ...prev, k: Math.min(prev.k * 1.2, 10) }));
   const zoomOut = () => setTransform(prev => ({ ...prev, k: Math.max(prev.k / 1.2, 0.1) }));
@@ -737,9 +777,12 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
   return (
     <div className={`relative w-full h-full bg-black overflow-hidden select-none ${isEditingBackground ? 'cursor-move' : ''}`}>
        
+       {/* The wall photo lies under the projector area (same size and zoom), behind the transparent canvas. */}
        <div 
-        className="absolute inset-0 pointer-events-none overflow-hidden"
+        className="absolute top-0 left-0 pointer-events-none"
         style={{
+            width: containerSize.w,
+            height: containerSize.h,
             transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.k})`,
             transformOrigin: '0 0'
         }}
@@ -749,8 +792,8 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
                 style={{
                     transform: `translate(${backgroundTransform.x}px, ${backgroundTransform.y}px) scale(${backgroundTransform.k})`,
                     transformOrigin: '0 0',
-                    width: '100%',
-                    height: '100%'
+                    width: containerSize.w,
+                    height: containerSize.h
                 }}
             >
                 <img 

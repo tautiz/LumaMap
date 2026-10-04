@@ -4,13 +4,14 @@ import { generateTexture } from '../services/gemini';
 import { TranslationKey, formatKey, useI18n } from '../i18n';
 import LanguageSwitcher from './LanguageSwitcher';
 import MediaLibraryDialog from './MediaLibraryDialog';
-import GridSettingsPanel from './GridSettingsPanel';
+import GridSettingsPanel, { ColorPicker } from './GridSettingsPanel';
+import Collapsible from './Collapsible';
 import { playVideos, playlistStep } from '../services/mediaLibrary';
 import {
   Upload, Monitor, Square, Layers, Sparkles, Move, Play, Image as ImageIcon, Save, FolderOpen, ExternalLink,
   Eye, EyeOff, Move3d, Plus, Trash2, ChevronUp, ChevronDown, Lock, Unlock, Settings, Copy, Keyboard,
   HelpCircle, Lightbulb, ArrowRight, Maximize, MousePointer2, ChevronRight, Download, Power, Link,
-  Film, SkipBack, SkipForward, Repeat, Frame
+  Film, SkipBack, SkipForward, Repeat, Frame, Palette, SlidersHorizontal
 } from 'lucide-react';
 
 interface ControlPanelProps {
@@ -64,6 +65,8 @@ const STEPS: { mode: AppMode; n: number; title: TranslationKey; desc: Translatio
   { mode: AppMode.MAPPING, n: 2, title: 'step.map.title', desc: 'step.map.desc', icon: Move, active: 'bg-purple-500 text-white', ring: 'border-purple-500' },
   { mode: AppMode.LIVE, n: 3, title: 'step.live.title', desc: 'step.live.desc', icon: Play, active: 'bg-emerald-500 text-slate-900', ring: 'border-emerald-500' },
 ];
+
+const COLORS = ['#ffffff', '#ff2d55', '#ff8800', '#ffcc00', '#00ff00', '#00e5ff', '#2d6bff', '#b46bff'];
 
 const SHORTCUTS: { id: ShortcutAction; label: TranslationKey }[] = [
   { id: 'NEXT_LAYER', label: 'setup.keys.next' },
@@ -204,6 +207,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   const sourceLabel = (layer: Layer) => {
     if (!layer.source) return t('map.selected.none');
     if (layer.source.type === ContentType.SOLID_COLOR) return t('source.grid');
+    if (layer.source.type === ContentType.COLOR) return t('source.color');
     return layer.source.name;
   };
 
@@ -270,8 +274,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         <>
           <Hint color="bg-cyan-500/15 text-cyan-100">{t('setup.hint')}</Hint>
 
-          <section className="space-y-3">
-            <SectionTitle icon={ImageIcon}>{t('setup.photo.title')}</SectionTitle>
+          <Collapsible title={t('setup.photo.title')} icon={ImageIcon} defaultOpen>
             <label className={`relative border-2 border-dashed rounded-xl flex flex-col items-center justify-center text-center cursor-pointer transition-colors overflow-hidden ${
               backgroundUrl ? 'border-slate-700 hover:border-cyan-500 h-28' : 'border-cyan-600/60 hover:border-cyan-400 hover:bg-cyan-500/5 p-6'
             }`}>
@@ -315,10 +318,9 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                 </button>
               </div>
             )}
-          </section>
+          </Collapsible>
 
-          <section className="space-y-3">
-            <SectionTitle icon={Monitor}>{t('setup.projector.title')}</SectionTitle>
+          <Collapsible title={t('setup.projector.title')} icon={Monitor} defaultOpen>
             <button
               onClick={onOpenLive}
               className="w-full py-3 rounded-xl bg-slate-800 border border-slate-600 text-white font-semibold hover:bg-slate-700 hover:border-cyan-500 flex items-center justify-center gap-2 transition-colors"
@@ -329,7 +331,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
             <button onClick={toggleFullscreen} className="w-full py-2 rounded-lg bg-slate-800 text-slate-300 text-sm hover:bg-slate-700 flex items-center justify-center gap-2">
               <Maximize size={16} /> {t('setup.fullscreen')}
             </button>
-          </section>
+          </Collapsible>
 
           <details className="group rounded-xl border border-slate-800 bg-slate-800/30">
             <summary className="cursor-pointer select-none list-none flex items-center gap-2 px-4 py-3 text-sm font-semibold text-slate-300 hover:text-white">
@@ -462,10 +464,9 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
           </section>
 
           {activeLayer && (
-            <section className="bg-slate-800/40 p-4 rounded-xl border border-slate-700 space-y-4">
-              <h3 className="text-base font-bold text-white">{t('map.selected.title')}</h3>
-
-              <div className="grid grid-cols-2 gap-2">
+            <>
+            <Collapsible title={t('map.selected.title')} icon={ImageIcon} summary={sourceLabel(activeLayer)} defaultOpen>
+              <div className="grid grid-cols-3 gap-2">
                 <label className="relative border-2 border-slate-700 bg-slate-900 rounded-xl p-3 flex flex-col items-center gap-1.5 text-center hover:border-purple-500 cursor-pointer transition-colors">
                   <input type="file" accept="image/*,video/*" className="sr-only" onChange={(e) => handleFileUpload(e, 'CONTENT')} />
                   <ImageIcon size={24} className="text-purple-400" />
@@ -473,10 +474,20 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                 </label>
                 <button
                   onClick={() => onUpdateLayer(activeLayer.id, { source: { type: ContentType.SOLID_COLOR, url: '', name: 'Grid Pattern' }, playlist: null })}
-                  className="border-2 border-slate-700 bg-slate-900 rounded-xl p-3 flex flex-col items-center gap-1.5 hover:border-emerald-500 transition-colors"
+                  className={`border-2 bg-slate-900 rounded-xl p-3 flex flex-col items-center gap-1.5 hover:border-emerald-500 transition-colors ${activeLayer.source?.type === ContentType.SOLID_COLOR ? 'border-emerald-500' : 'border-slate-700'}`}
                 >
                   <Square size={24} className="text-emerald-400" />
                   <span className="text-xs font-medium text-slate-200">{t('map.selected.grid')}</span>
+                </button>
+                <button
+                  onClick={() => onUpdateLayer(activeLayer.id, {
+                    source: { type: ContentType.COLOR, url: '', name: 'Color', color: activeLayer.source?.color || '#ffffff' },
+                    playlist: null
+                  })}
+                  className={`border-2 bg-slate-900 rounded-xl p-3 flex flex-col items-center gap-1.5 hover:border-pink-500 transition-colors ${activeLayer.source?.type === ContentType.COLOR ? 'border-pink-500' : 'border-slate-700'}`}
+                >
+                  <Palette size={24} className="text-pink-400" />
+                  <span className="text-xs font-medium text-slate-200">{t('map.selected.color')}</span>
                 </button>
               </div>
 
@@ -491,7 +502,16 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
               <p className="text-xs text-slate-400 truncate">{t('map.selected.current', { name: sourceLabel(activeLayer) })}</p>
 
               {activeLayer.source?.type === ContentType.SOLID_COLOR && (
-                <GridSettingsPanel layer={activeLayer} gridDefaults={gridDefaults} setGridDefaults={setGridDefaults} onUpdateLayer={onUpdateLayer} />
+                <GridSettingsPanel layer={activeLayer} gridDefaults={gridDefaults} setGridDefaults={setGridDefaults} onUpdateLayer={onUpdateLayer} projectorSize={projectorSize} />
+              )}
+
+              {activeLayer.source?.type === ContentType.COLOR && (
+                <ColorPicker
+                  label={t('map.selected.colorPick')}
+                  colors={COLORS}
+                  value={activeLayer.source.color || '#ffffff'}
+                  onChange={(c) => onUpdateLayer(activeLayer.id, { source: { ...activeLayer.source!, color: c } })}
+                />
               )}
 
               {activeLayer.playlist && activeLayer.playlist.items.length > 1 && (() => {
@@ -523,6 +543,9 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                 );
               })()}
 
+            </Collapsible>
+
+            <Collapsible title={t('map.selected.settings')} icon={SlidersHorizontal} defaultOpen>
               <label className="block space-y-1">
                 <span className="text-xs text-slate-400">{t('map.selected.name')}</span>
                 <input
@@ -578,7 +601,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                   </button>
                 </div>
               </details>
-            </section>
+            </Collapsible>
+            </>
           )}
 
           <ul className="space-y-1.5 text-xs text-slate-400">
@@ -618,8 +642,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
             <span className="text-xs font-mono opacity-70">({formatKey(keyMappings.TOGGLE_FRAME, t)})</span>
           </button>
 
-          <section className="space-y-3">
-            <SectionTitle icon={Power}>{t('show.title')}</SectionTitle>
+          <Collapsible title={t('show.title')} icon={Power}>
             <p className="text-xs text-slate-400">{t('show.hint')}</p>
             <div className="grid grid-cols-2 gap-2">
               <button onClick={onExport} className="flex items-center justify-center gap-1.5 py-2 rounded-lg bg-slate-800 text-slate-200 text-sm hover:bg-slate-700 transition-colors">
@@ -640,7 +663,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                 className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-xs font-mono text-cyan-300"
               />
             </div>
-          </section>
+          </Collapsible>
         </>
       )}
       </div>
