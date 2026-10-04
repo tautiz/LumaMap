@@ -102,6 +102,14 @@ const lt = {
 
   'receiver.waiting': 'Projektoriaus langas • Laukiama valdymo lango...',
 
+  'show.title': 'Automatinis pasirodymas',
+  'show.hint': 'Pirma paspausk „Išsaugoti“. Tada atidarius nuorodą žemiau, pasirodymas prasidės pats, be jokio valdymo. Failu gali perkelti pasirodymą su visais vaizdo įrašais į kitą įrenginį.',
+  'show.export': 'Atsisiųsti failą',
+  'show.import': 'Įkelti failą',
+  'show.link': 'Pasirodymo nuoroda',
+  'show.loading': 'Kraunamas pasirodymas...',
+  'show.retrying': 'Nepavyko atsisiųsti pasirodymo. Bandoma dar kartą...',
+  'show.missing': 'Išsaugoto pasirodymo nerasta. Atidaryk LumaMap šiame įrenginyje ir paspausk „Išsaugoti“ arba įkelk pasirodymo failą.',
   'alert.saved': 'Projektas išsaugotas!',
   'alert.saveFailed': 'Nepavyko išsaugoti projekto.',
   'alert.noSaved': 'Išsaugoto projekto nerasta.',
@@ -150,7 +158,7 @@ const lt = {
   'help.tips.t1': 'Pradėk nuo langelių tinklelio: jį lengviausia tiksliai uždėti ant sienos.',
   'help.tips.t2': 'Užrakink sluoksnį (spynelė), kai jis jau gerai uždėtas, kad netyčia nepajudintum.',
   'help.tips.t3': 'Projektoriaus langas rodo tą patį, ką matai čia. Valdyk viską iš šio lango.',
-  'help.tips.t4': 'Išsaugotas projektas laikomas šioje naršyklėje. Įkeltas nuotraukas ir vaizdo įrašus po atidarymo reikės įkelti iš naujo.',
+  'help.tips.t4': 'Išsaugotas projektas su visomis nuotraukomis ir vaizdo įrašais laikomas šioje naršyklėje. Į kitą įrenginį jį perkelsi „Rodyk“ žingsnyje atsisiuntęs pasirodymo failą.',
   'help.tips.t5': 'Pasimetei pasirodymo metu? Paspausk {ui} arba pajudink pelę ir spausk „Rodyti valdymą“.',
 };
 
@@ -258,6 +266,14 @@ const en: Dictionary = {
 
   'receiver.waiting': 'Projector window • Waiting for the control window...',
 
+  'show.title': 'Automatic show',
+  'show.hint': 'Press “Save” first. Opening the link below then starts the show by itself, with no controls. The file moves a show, videos included, to another device.',
+  'show.export': 'Download file',
+  'show.import': 'Upload file',
+  'show.link': 'Show link',
+  'show.loading': 'Loading the show...',
+  'show.retrying': 'Could not download the show. Trying again...',
+  'show.missing': 'No saved show found. Open LumaMap on this device and press “Save”, or upload a show file.',
   'alert.saved': 'Project saved!',
   'alert.saveFailed': 'Could not save the project.',
   'alert.noSaved': 'No saved project found.',
@@ -306,7 +322,7 @@ const en: Dictionary = {
   'help.tips.t1': 'Start with the grid pattern: it is the easiest to line up with the wall.',
   'help.tips.t2': 'Lock a layer (padlock) once it fits, so you don’t move it by accident.',
   'help.tips.t3': 'The projector window shows the same thing you see here. Control everything from this window.',
-  'help.tips.t4': 'A saved project is kept in this browser. Uploaded photos and videos need to be uploaded again after opening.',
+  'help.tips.t4': 'A saved project, with all its photos and videos, is kept in this browser. To move it to another device, download the show file in the “Show” step.',
   'help.tips.t5': 'Lost during the show? Press {ui}, or move the mouse and click “Show controls”.',
 };
 

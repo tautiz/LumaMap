@@ -6,7 +6,7 @@ import LanguageSwitcher from './LanguageSwitcher';
 import {
   Upload, Monitor, Square, Layers, Sparkles, Move, Play, Image as ImageIcon, Save, FolderOpen, ExternalLink,
   Eye, EyeOff, Move3d, Plus, Trash2, ChevronUp, ChevronDown, Lock, Unlock, Settings, Copy, Keyboard,
-  HelpCircle, Lightbulb, ArrowRight, Maximize, MousePointer2, ChevronRight
+  HelpCircle, Lightbulb, ArrowRight, Maximize, MousePointer2, ChevronRight, Download, Power, Link
 } from 'lucide-react';
 
 interface ControlPanelProps {
@@ -29,6 +29,9 @@ interface ControlPanelProps {
 
   onSave: () => void;
   onLoad: () => void;
+  onExport: () => void;
+  onImport: (file: File) => void;
+  showLink: string;
   onOpenLive: () => void;
   onOpenHelp: () => void;
 
@@ -95,6 +98,9 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   onUploadBackground,
   onSave,
   onLoad,
+  onExport,
+  onImport,
+  showLink,
   onOpenLive,
   onOpenHelp,
   showBackgroundInLive,
@@ -537,6 +543,30 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
           <button onClick={onOpenLive} className="w-full py-3 rounded-xl bg-slate-800 border border-slate-600 text-white font-semibold hover:bg-slate-700 flex items-center justify-center gap-2">
             <ExternalLink size={18} /> {t('setup.projector.open')}
           </button>
+
+          <section className="space-y-3">
+            <SectionTitle icon={Power}>{t('show.title')}</SectionTitle>
+            <p className="text-xs text-slate-400">{t('show.hint')}</p>
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={onExport} className="flex items-center justify-center gap-1.5 py-2 rounded-lg bg-slate-800 text-slate-200 text-sm hover:bg-slate-700 transition-colors">
+                <Download size={16} /> {t('show.export')}
+              </button>
+              <label className="flex items-center justify-center gap-1.5 py-2 rounded-lg bg-slate-800 text-slate-200 text-sm hover:bg-slate-700 transition-colors cursor-pointer">
+                <input
+                  type="file" accept=".lumamap" className="sr-only"
+                  onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onImport(f); }}
+                />
+                <Upload size={16} /> {t('show.import')}
+              </label>
+            </div>
+            <div className="space-y-1">
+              <span className="text-xs text-slate-400 flex items-center gap-1.5"><Link size={12} /> {t('show.link')}</span>
+              <input
+                readOnly value={showLink} onFocus={(e) => e.target.select()}
+                className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-xs font-mono text-cyan-300"
+              />
+            </div>
+          </section>
         </>
       )}
       </div>
