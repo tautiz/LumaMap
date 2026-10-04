@@ -6,6 +6,7 @@ import { triangulate, solveAffine, getBarycentric, pointInTriangle } from '../ut
 import Draggable from 'react-draggable';
 import { useI18n } from '../i18n';
 import { videoLoops } from '../services/mediaLibrary';
+import { ContentDraw, EffectsEngine, FrameEnv, compileStack, drawGradientTexture, elementColor, gradientKey, layerNeedsFrames, textureSize } from '../effects';
 import { ZoomIn, ZoomOut, RefreshCw, Play, Pause, Volume2, VolumeX } from 'lucide-react';
 
 interface SurfaceCanvasProps {
@@ -73,6 +74,11 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
   const dirtyRef = useRef(true);
   // Grid textures by settings, so each grid is drawn once and not on every frame.
   const gridTexturesRef = useRef<Map<string, HTMLCanvasElement>>(new Map());
+  // Gradient textures by colours and angle, made once like the grid.
+  const gradientTexturesRef = useRef<Map<string, HTMLCanvasElement>>(new Map());
+  // Draws the elements' effects (see effects/).
+  const fxRef = useRef<EffectsEngine | null>(null);
+  if (!fxRef.current) fxRef.current = new EffectsEngine();
 
   // Global Pan and Zoom State (Camera)
   const [transform, setTransform] = useState({ x: 20, y: 20, k: 0.8 }); // Start slightly zoomed out and padded
@@ -227,15 +233,21 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
     const ctx = canvas?.getContext('2d');
     // Patterns of still textures (pictures, the grid) are made once; a video needs a new one every frame.
     const staticPatterns = new WeakMap<CanvasImageSource, CanvasPattern | null>();
+    const fx = fxRef.current!;
+    // Draw one more frame after the last moving effect stops, so a finished signal effect is cleared away.
+    let wasMoving = false;
 
     const render = () => {
       animationFrameId = requestAnimationFrame(render);
       if (!canvas || !ctx) return;
 
       const { layers, activeLayer, mode, k, isEditingBackground, containerSize, gridDefaults, showProjectorFrame } = sceneRef.current;
+      const now = Date.now();
       const hasVideo = layers.some(l => l.visible && l.source?.type === ContentType.VIDEO);
-      if (!dirtyRef.current && !hasVideo) return;
+      const moving = layers.some(l => l.visible && layerNeedsFrames(l, now));
+      if (!dirtyRef.current && !hasVideo && !moving && !wasMoving) return;
       dirtyRef.current = false;
+      wasMoving = moving;
 
       // Draw at the size the canvas is actually shown (zoom x screen density), never above the logical size.
       // The projector window shows the scene at 0.8, so this skips about a third of the pixels there.
@@ -254,12 +266,15 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
       ctx.setTransform(s, 0, 0, s, 0, 0);
       ctx.globalAlpha = 1;
       ctx.clearRect(0, 0, w, h);
+      fx.prune(new Set(layers.map(l => l.id)));
 
       // Render layers
       layers.forEach(layer => {
           if (!layer.visible) return;
-          if (!layer.source) return;
           if (layer.points.length < 3) return;
+          // Only the passes this element needs: none at all for an element without effects.
+          const graph = compileStack(layer, now);
+          if (!layer.source && graph.textureEffects === 0 && graph.under.length === 0 && graph.over.length === 0) return;
 
           // Calculate final opacity: User setting * System transition
           // Default transitionOpacity to 1 if undefined
@@ -273,12 +288,19 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
 
           ctx.globalAlpha = finalOpacity;
 
+          const env: FrameEnv = { now, scale: s, area: { w, h }, layers, elementColor: elementColor(layer, gridDefaults) };
+          fx.drawScreen(ctx, layer, graph.under, finalOpacity, env);
+          ctx.globalAlpha = finalOpacity;
+
           let texture: CanvasImageSource | null = null;
           let isStatic = true;
           let texW = 1000;
           let texH = 1000;
+          const withEffects = graph.textureEffects > 0;
 
-          if (layer.source.type === ContentType.VIDEO) {
+          if (!layer.source) {
+              // No content: only the effects make the picture.
+          } else if (layer.source.type === ContentType.VIDEO) {
               const vid = videoCache.get(layer.id);
               if (vid && vid.readyState >= 2) {
                   texture = vid;
@@ -293,6 +315,8 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
                   texW = img.naturalWidth;
                   texH = img.naturalHeight;
               }
+          } else if (layer.source.type === ContentType.COLOR && withEffects) {
+              // Drawn by the effects pipeline below, as the bottom of the stack.
           } else if (layer.source.type === ContentType.COLOR) {
               // A plain colour needs no texture: fill all triangles as one shape, so there are no seams between them.
               ctx.fillStyle = layer.source.color || '#ffffff';
@@ -321,6 +345,37 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
               texture = canvas;
               texW = canvas.width;
               texH = canvas.height;
+          } else if (layer.source.type === ContentType.GRADIENT) {
+              const key = gradientKey(layer.source);
+              let canvas = gradientTexturesRef.current.get(key);
+              if (!canvas) {
+                  if (gradientTexturesRef.current.size > 16) gradientTexturesRef.current.clear();
+                  canvas = drawGradientTexture(layer.source);
+                  gradientTexturesRef.current.set(key, canvas);
+              }
+              texture = canvas;
+              texW = canvas.width;
+              texH = canvas.height;
+          }
+
+          if (withEffects) {
+              // Content + effects become one picture, which is then mapped onto the mesh like any texture.
+              let content: ContentDraw = { kind: 'none' };
+              if (layer.source?.type === ContentType.COLOR) content = { kind: 'color', color: layer.source.color || '#ffffff' };
+              else if (texture) content = { kind: 'image', image: texture, isStatic, key: layer.source?.type === ContentType.IMAGE ? layer.source.url : `${layer.source?.type}|${texW}x${texH}|${layer.source?.type === ContentType.GRADIENT ? gradientKey(layer.source) : gridKey(layer.grid ?? gridDefaults)}` };
+              else if (layer.source?.type === ContentType.VIDEO || layer.source?.type === ContentType.IMAGE) {
+                  // The video or picture is still loading: show nothing yet rather than the effects alone.
+                  fx.drawScreen(ctx, layer, graph.over, finalOpacity, env);
+                  return;
+              }
+              const result = fx.renderTexture(layer, graph, content, textureSize(layer.points, s), env);
+              texture = result;
+              isStatic = false; // Its pixels change while the canvas object stays the same
+              if (result) {
+                  texW = result.width;
+                  texH = result.height;
+              }
+              ctx.globalAlpha = finalOpacity;
           }
 
           if (texture) {
@@ -408,6 +463,8 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
                  ctx.restore();
              }
           }
+
+          fx.drawScreen(ctx, layer, graph.over, finalOpacity, env);
       });
 
       // --- Draw Scene Bounds & Wireframe (Overlay) ---

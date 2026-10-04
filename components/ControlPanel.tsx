@@ -6,12 +6,13 @@ import LanguageSwitcher from './LanguageSwitcher';
 import MediaLibraryDialog from './MediaLibraryDialog';
 import GridSettingsPanel, { ColorPicker } from './GridSettingsPanel';
 import Collapsible from './Collapsible';
+import EffectStackPanel from './EffectStackPanel';
 import { playVideos, playlistStep } from '../services/mediaLibrary';
 import {
   Upload, Monitor, Square, Layers, Sparkles, Move, Play, Image as ImageIcon, Save, FolderOpen, ExternalLink,
   Eye, EyeOff, Move3d, Plus, Trash2, ChevronUp, ChevronDown, Lock, Unlock, Settings, Copy, Keyboard,
   HelpCircle, Lightbulb, ArrowRight, Maximize, MousePointer2, ChevronRight, Download, Power, Link,
-  Film, SkipBack, SkipForward, Repeat, Frame, Palette, SlidersHorizontal
+  Film, SkipBack, SkipForward, Repeat, Frame, Palette, SlidersHorizontal, Blend, SquareDashed
 } from 'lucide-react';
 
 interface ControlPanelProps {
@@ -74,6 +75,7 @@ const SHORTCUTS: { id: ShortcutAction; label: TranslationKey }[] = [
   { id: 'BLACKOUT', label: 'setup.keys.blackout' },
   { id: 'TOGGLE_UI', label: 'setup.keys.toggleUi' },
   { id: 'TOGGLE_FRAME', label: 'setup.keys.toggleFrame' },
+  { id: 'TRIGGER_FX', label: 'setup.keys.trigger' },
 ];
 
 const SectionTitle: React.FC<{ icon: React.ElementType; children: React.ReactNode }> = ({ icon: Icon, children }) => (
@@ -205,9 +207,10 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   };
 
   const sourceLabel = (layer: Layer) => {
-    if (!layer.source) return t('map.selected.none');
+    if (!layer.source) return t('source.transparent');
     if (layer.source.type === ContentType.SOLID_COLOR) return t('source.grid');
     if (layer.source.type === ContentType.COLOR) return t('source.color');
+    if (layer.source.type === ContentType.GRADIENT) return t('source.gradient');
     return layer.source.name;
   };
 
@@ -489,6 +492,26 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                   <Palette size={24} className="text-pink-400" />
                   <span className="text-xs font-medium text-slate-200">{t('map.selected.color')}</span>
                 </button>
+                <button
+                  onClick={() => onUpdateLayer(activeLayer.id, {
+                    source: {
+                      type: ContentType.GRADIENT, url: '', name: 'Gradient',
+                      color: activeLayer.source?.color || '#2d6bff', color2: activeLayer.source?.color2 || '#ff2d55', angle: activeLayer.source?.angle ?? 0,
+                    },
+                    playlist: null
+                  })}
+                  className={`border-2 bg-slate-900 rounded-xl p-3 flex flex-col items-center gap-1.5 hover:border-sky-500 transition-colors ${activeLayer.source?.type === ContentType.GRADIENT ? 'border-sky-500' : 'border-slate-700'}`}
+                >
+                  <Blend size={24} className="text-sky-400" />
+                  <span className="text-xs font-medium text-slate-200">{t('map.selected.gradient')}</span>
+                </button>
+                <button
+                  onClick={() => onUpdateLayer(activeLayer.id, { source: null, playlist: null })}
+                  className={`border-2 bg-slate-900 rounded-xl p-3 flex flex-col items-center gap-1.5 hover:border-slate-400 transition-colors col-span-2 ${!activeLayer.source ? 'border-slate-300' : 'border-slate-700'}`}
+                >
+                  <SquareDashed size={24} className="text-slate-300" />
+                  <span className="text-xs font-medium text-slate-200">{t('map.selected.transparent')}</span>
+                </button>
               </div>
 
               <button
@@ -512,6 +535,23 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                   value={activeLayer.source.color || '#ffffff'}
                   onChange={(c) => onUpdateLayer(activeLayer.id, { source: { ...activeLayer.source!, color: c } })}
                 />
+              )}
+
+              {activeLayer.source?.type === ContentType.GRADIENT && (
+                <div className="space-y-2">
+                  <ColorPicker label={t('map.selected.gradientFrom')} colors={COLORS} value={activeLayer.source.color || '#2d6bff'}
+                    onChange={(c) => onUpdateLayer(activeLayer.id, { source: { ...activeLayer.source!, color: c } })} />
+                  <ColorPicker label={t('map.selected.gradientTo')} colors={COLORS} value={activeLayer.source.color2 || '#ff2d55'}
+                    onChange={(c) => onUpdateLayer(activeLayer.id, { source: { ...activeLayer.source!, color2: c } })} />
+                  <label className="block space-y-1">
+                    <span className="flex justify-between text-xs text-slate-400">
+                      <span>{t('map.selected.gradientAngle')}</span><span>{activeLayer.source.angle ?? 0}°</span>
+                    </span>
+                    <input type="range" min="0" max="360" step="5" value={activeLayer.source.angle ?? 0}
+                      onChange={(e) => onUpdateLayer(activeLayer.id, { source: { ...activeLayer.source!, angle: parseInt(e.target.value) } })}
+                      className="w-full accent-sky-500" />
+                  </label>
+                </div>
               )}
 
               {activeLayer.playlist && activeLayer.playlist.items.length > 1 && (() => {
@@ -544,6 +584,15 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
               })()}
 
             </Collapsible>
+
+            <EffectStackPanel
+              layer={activeLayer}
+              layers={layers}
+              contentLabel={sourceLabel(activeLayer)}
+              gridDefaults={gridDefaults}
+              triggerKey={formatKey(keyMappings.TRIGGER_FX, t)}
+              onUpdateLayer={onUpdateLayer}
+            />
 
             <Collapsible title={t('map.selected.settings')} icon={SlidersHorizontal} defaultOpen>
               <label className="block space-y-1">

@@ -22,6 +22,14 @@ browser (added once from the computer, kept offline) or from `media/library.json
 `scripts/download-media.sh` downloads a YouTube playlist into such a folder. After the first visit the app
 also opens without internet. Guide (Lithuanian): [docs/video-biblioteka.md](docs/video-biblioteka.md).
 
+## Effects
+
+Every layer is optional content plus a stack of effects (sparks, fire, lightning, water ripple, glitch, electric
+border, glow, aura, reveal masks, laser and arc between elements...). Effects can draw on their own, change the
+content, sit on top of it or behind it, mix by blend mode, follow the element's colour, and run all the time or
+once on a signal (key T, `LumaAPI.triggerEffects()`). Stacks can be saved as sets. The content is never changed.
+Guide and architecture (Lithuanian): [docs/efektai.md](docs/efektai.md).
+
 ## Run Locally
 
 **Prerequisites:**  Node.js
