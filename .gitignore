@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Downloaded videos (scripts/download-media.sh). Kept out of git: they are large and not ours to publish.
+public/media/*
+!public/media/README.md

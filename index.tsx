@@ -17,3 +17,10 @@ root.render(
     </LanguageProvider>
   </React.StrictMode>
 );
+// Lets the app open without internet after the first visit (see public/sw.js). Only in the built
+// app: in development it would serve stale files.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(e => console.warn('Offline support unavailable', e));
+  });
+}

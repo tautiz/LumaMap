@@ -18,8 +18,9 @@ mkdir -p "$(dirname "$LAUNCHER")" "$HOME/.config/autostart"
 
 cat > "$LAUNCHER" <<SCRIPT
 #!/usr/bin/env bash
-# Wait up to two minutes for the network, so the page does not open before Wi-Fi is up.
-for _ in \$(seq 60); do
+# Wait up to about a minute for the network, so the page does not open before Wi-Fi is up. Without
+# internet the page still opens from the copy saved on the last visit.
+for _ in \$(seq 20); do
   curl -sf --max-time 3 -o /dev/null "$URL" && break
   sleep 2
 done
