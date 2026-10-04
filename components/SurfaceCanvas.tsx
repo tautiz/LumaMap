@@ -3,6 +3,7 @@ import React, { useRef, useEffect, useState } from 'react';
 import { ControlPoint, ContentType, AppMode, Transform, Layer } from '../types';
 import { triangulate, solveAffine, getBarycentric, pointInTriangle } from '../utils/math';
 import Draggable from 'react-draggable';
+import { useI18n } from '../i18n';
 import { ZoomIn, ZoomOut, RefreshCw, Play, Pause, Volume2, VolumeX } from 'lucide-react';
 
 interface SurfaceCanvasProps {
@@ -39,6 +40,7 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
   isEditingBackground = false,
   projectorSize
 }) => {
+  const { t } = useI18n();
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [containerSize, setContainerSize] = useState({ w: 2363, h: 1320 });
@@ -546,9 +548,29 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
     setDraggedLayerId(null);
   };
 
+  // Fit the whole projector area into the visible editor area.
   const resetView = () => {
-    setTransform({ x: 20, y: 20, k: 0.8 });
+    const el = containerRef.current;
+    if (!el || !el.clientWidth || !el.clientHeight) {
+        setTransform({ x: 20, y: 20, k: 0.8 });
+        return;
+    }
+    const pad = 40;
+    const k = Math.min((el.clientWidth - pad * 2) / containerSize.w, (el.clientHeight - pad * 2) / containerSize.h, 1);
+    setTransform({
+        x: (el.clientWidth - containerSize.w * k) / 2,
+        y: (el.clientHeight - containerSize.h * k) / 2,
+        k
+    });
   };
+
+  // Start the editor with everything in view (the live projector keeps its own framing).
+  const hasFittedRef = useRef(false);
+  useEffect(() => {
+    if (hasFittedRef.current || mode === AppMode.LIVE) return;
+    hasFittedRef.current = true;
+    resetView();
+  }, [mode, containerSize]);
   const zoomIn = () => setTransform(prev => ({ ...prev, k: Math.min(prev.k * 1.2, 10) }));
   const zoomOut = () => setTransform(prev => ({ ...prev, k: Math.max(prev.k / 1.2, 0.1) }));
 
@@ -750,9 +772,9 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
             {!isEditingBackground && mode === AppMode.MAPPING && (
                 <div className="absolute bottom-4 left-4 flex flex-col gap-2 z-[100]" onMouseDown={e => e.stopPropagation()}>
                     <div className="bg-slate-900/80 backdrop-blur border border-slate-700 rounded-lg p-1 flex flex-col gap-1 shadow-xl">
-                        <button onClick={zoomIn} className="p-2 text-slate-300 hover:text-white hover:bg-slate-700 rounded"><ZoomIn size={18} /></button>
-                        <button onClick={resetView} className="p-2 text-slate-300 hover:text-white hover:bg-slate-700 rounded"><RefreshCw size={18} /></button>
-                        <button onClick={zoomOut} className="p-2 text-slate-300 hover:text-white hover:bg-slate-700 rounded"><ZoomOut size={18} /></button>
+                        <button onClick={zoomIn} title={t('zoom.in')} aria-label={t('zoom.in')} className="p-2 text-slate-300 hover:text-white hover:bg-slate-700 rounded"><ZoomIn size={18} /></button>
+                        <button onClick={resetView} title={t('zoom.reset')} aria-label={t('zoom.reset')} className="p-2 text-slate-300 hover:text-white hover:bg-slate-700 rounded"><RefreshCw size={18} /></button>
+                        <button onClick={zoomOut} title={t('zoom.out')} aria-label={t('zoom.out')} className="p-2 text-slate-300 hover:text-white hover:bg-slate-700 rounded"><ZoomOut size={18} /></button>
                     </div>
                 </div>
             )}
@@ -762,7 +784,7 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
                  className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-slate-900/90 backdrop-blur border border-slate-700 rounded-lg p-2 flex items-center gap-3 shadow-2xl z-[100] min-w-[300px]"
                  onMouseDown={(e) => e.stopPropagation()}
                 >
-                 <button onClick={() => handleVideoAction(activeLayer.playback.isPlaying ? 'pause' : 'play')} className="p-1.5 text-cyan-400 hover:bg-slate-800 rounded-full transition-colors">
+                 <button onClick={() => handleVideoAction(activeLayer.playback.isPlaying ? 'pause' : 'play')} title={activeLayer.playback.isPlaying ? t('video.pause') : t('video.play')} className="p-1.5 text-cyan-400 hover:bg-slate-800 rounded-full transition-colors">
                      {activeLayer.playback.isPlaying ? <Pause size={18} /> : <Play size={18} />}
                  </button>
  
@@ -776,7 +798,7 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
                  </div>
  
                  <div className="flex items-center gap-1 group">
-                     <button onClick={() => handleVideoAction('mute')} className="text-slate-400 hover:text-white">
+                     <button onClick={() => handleVideoAction('mute')} title={t('video.mute')} className="text-slate-400 hover:text-white">
                          {activeLayer.playback.isMuted || activeLayer.playback.volume === 0 ? <VolumeX size={16} /> : <Volume2 size={16} />}
                      </button>
                      <div className="w-0 overflow-hidden group-hover:w-16 transition-all duration-300">
@@ -793,7 +815,7 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
 
             {isEditingBackground && (
                 <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-yellow-600/90 text-white px-4 py-1 rounded-full text-xs font-bold pointer-events-none shadow-lg z-[100]">
-                    EDITING BACKGROUND POSITION
+                    {t('canvas.editingBackground')}
                 </div>
             )}
        </div>
