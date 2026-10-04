@@ -1,4 +1,5 @@
 import { ControlPoint, GridSettings } from '../types';
+import { rotatePoints } from './math';
 
 export const DEFAULT_GRID: GridSettings = {
   unit: 'm',
@@ -131,8 +132,10 @@ const CORNERS = [[0, 0], [1, 0], [1, 1], [0, 1]];
 const cornerIndex = (points: ControlPoint[]) =>
   CORNERS.map(([u, v]) => points.findIndex(p => p.u === u && p.v === v));
 
-export const isPlainRectangle = (points: ControlPoint[]): boolean => {
+export const isPlainRectangle = (points: ControlPoint[], rotation = 0): boolean => {
   if (points.length !== 4) return false;
+  // A turned element counts as plain when its corners make an upright rectangle once turned back.
+  if (rotation) points = rotatePoints(points, -rotation);
   const [tl, tr, br, bl] = cornerIndex(points).map(i => points[i]);
   if (!tl || !tr || !br || !bl) return false;
   const near = (a: number, b: number) => Math.abs(a - b) < 0.5;
@@ -142,8 +145,13 @@ export const isPlainRectangle = (points: ControlPoint[]): boolean => {
 /**
  * Four corners of an upright rectangle with the given width/height proportion. It keeps the centre and the
  * area of the current corners (or sits in the middle of the projector area), and always fits inside it.
+ * With `rotation` the rectangle is worked out as if the element were not turned, then turned again.
  */
-export const proportionalPoints = (aspect: number, area: { w: number; h: number }, current?: ControlPoint[]): ControlPoint[] => {
+export const proportionalPoints = (aspect: number, area: { w: number; h: number }, current?: ControlPoint[], rotation = 0): ControlPoint[] => {
+  if (rotation) {
+    const upright = proportionalPoints(aspect, area, current && rotatePoints(current, -rotation));
+    return rotatePoints(upright, rotation);
+  }
   let cx = area.w / 2;
   let cy = area.h / 2;
   let size = area.w * area.h * 0.35; // about a third of the picture

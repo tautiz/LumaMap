@@ -8,12 +8,52 @@ import GridSettingsPanel, { ColorPicker } from './GridSettingsPanel';
 import Collapsible from './Collapsible';
 import EffectStackPanel from './EffectStackPanel';
 import { playVideos, playlistStep } from '../services/mediaLibrary';
+import { rotationUpdate } from '../utils/math';
 import {
   Upload, Monitor, Square, Layers, Sparkles, Move, Play, Image as ImageIcon, Save, FolderOpen, ExternalLink,
   Eye, EyeOff, Move3d, Plus, Trash2, ChevronUp, ChevronDown, Lock, Unlock, Settings, Copy, Keyboard,
   HelpCircle, Lightbulb, ArrowRight, Maximize, MousePointer2, ChevronRight, Download, Power, Link,
-  Film, SkipBack, SkipForward, Repeat, Frame, Palette, SlidersHorizontal, Blend, SquareDashed
+  Film, SkipBack, SkipForward, Repeat, Frame, Palette, SlidersHorizontal, Blend, SquareDashed, RotateCw
 } from 'lucide-react';
+
+// Exact rotation of the element in degrees: a slider for rough turning and a number field for exact values.
+const RotationField: React.FC<{ value: number; disabled?: boolean; onChange: (deg: number) => void }> = ({ value, disabled, onChange }) => {
+  const { t, lang } = useI18n();
+  const [draft, setDraft] = useState<string | null>(null); // What is being typed, so the field does not jump
+  const commit = (text: string) => {
+    const deg = parseFloat(text.replace(',', '.').replace('−', '-'));
+    if (Number.isFinite(deg)) onChange(deg);
+  };
+  return (
+    <div className="space-y-1">
+      <span className="flex justify-between items-center text-xs text-slate-400">
+        <span className="flex items-center gap-1"><RotateCw size={12} /> {t('map.selected.rotation')}</span>
+        <span className="flex items-center gap-1">
+          <input
+            type="text" inputMode="decimal" disabled={disabled}
+            aria-label={t('map.selected.rotation')}
+            value={draft ?? value.toLocaleString(lang, { maximumFractionDigits: 1, useGrouping: false })}
+            onChange={(e) => { setDraft(e.target.value); commit(e.target.value); }}
+            onBlur={() => setDraft(null)}
+            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+            className="w-14 bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-right text-slate-100 disabled:opacity-50"
+          />°
+          <button
+            onClick={() => onChange(0)} disabled={disabled || value === 0}
+            title={t('map.selected.rotationReset')} aria-label={t('map.selected.rotationReset')}
+            className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 hover:bg-slate-700 disabled:opacity-40"
+          >0°</button>
+        </span>
+      </span>
+      <input
+        type="range" min="-180" max="180" step="1" disabled={disabled}
+        value={value}
+        onChange={(e) => onChange(parseFloat(e.target.value))}
+        className="w-full accent-purple-500 disabled:opacity-50"
+      />
+    </div>
+  );
+};
 
 interface ControlPanelProps {
   mode: AppMode;
@@ -617,6 +657,12 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                   className="w-full accent-purple-500"
                 />
               </label>
+
+              <RotationField
+                value={activeLayer.rotation ?? 0}
+                disabled={activeLayer.locked}
+                onChange={(deg) => onUpdateLayer(activeLayer.id, rotationUpdate(activeLayer, deg))}
+              />
 
               <button
                 onClick={() => onUpdateLayer(activeLayer.id, { locked: !activeLayer.locked })}

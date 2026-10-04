@@ -2,12 +2,12 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { ControlPoint, ContentType, AppMode, Transform, Layer, GridSettings } from '../types';
 import { DEFAULT_GRID, drawGridTexture, gridKey } from '../utils/grid';
-import { triangulate, solveAffine, getBarycentric, pointInTriangle } from '../utils/math';
+import { triangulate, solveAffine, getBarycentric, pointInTriangle, pointsCentre, rotatePoints, rotationUpdate, normalizeAngle } from '../utils/math';
 import Draggable from 'react-draggable';
 import { useI18n } from '../i18n';
 import { videoLoops } from '../services/mediaLibrary';
 import { ContentDraw, EffectsEngine, FrameEnv, compileStack, drawGradientTexture, elementColor, gradientKey, layerNeedsFrames, textureSize } from '../effects';
-import { ZoomIn, ZoomOut, RefreshCw, Play, Pause, Volume2, VolumeX } from 'lucide-react';
+import { ZoomIn, ZoomOut, RefreshCw, Play, Pause, Volume2, VolumeX, RotateCw } from 'lucide-react';
 
 interface SurfaceCanvasProps {
   mode: AppMode;
@@ -89,6 +89,16 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
   const [draggedLayerId, setDraggedLayerId] = useState<string | null>(null);
   
   const lastPanRef = useRef({ x: 0, y: 0 });
+
+  // Turning the active element with the round handle above it. Each move turns the points as they were when
+  // the drag started, so small rounding errors never add up.
+  const [rotateDrag, setRotateDrag] = useState<{
+    layerId: string;
+    centre: { x: number; y: number };
+    startAngle: number; // Mouse direction from the centre when the drag started (degrees)
+    startRotation: number;
+    startPoints: ControlPoint[];
+  } | null>(null);
 
   // Selection and Editing State
   const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(null);
@@ -534,6 +544,15 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
         const target = e.target as HTMLElement;
         if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
 
+        // Q / E turn the whole element 1° (15° with Shift) left / right.
+        const key = e.key.toLowerCase();
+        if ((key === 'q' || key === 'e') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            e.preventDefault();
+            const step = (e.shiftKey ? 15 : 1) * (key === 'q' ? -1 : 1);
+            onUpdateLayer(activeLayer.id, rotationUpdate(activeLayer, (activeLayer.rotation ?? 0) + step));
+            return;
+        }
+
         let dx = 0;
         let dy = 0;
         const step = e.shiftKey ? 10 : 1; // 1px normal, 10px with Shift
@@ -651,7 +670,43 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
     lastPanRef.current = { x: e.clientX, y: e.clientY };
   };
 
+  // Mouse position in projector pixels.
+  const toWorld = (e: { clientX: number; clientY: number }) => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    const left = rect?.left ?? 0, top = rect?.top ?? 0;
+    return { x: (e.clientX - left - transform.x) / transform.k, y: (e.clientY - top - transform.y) / transform.k };
+  };
+
+  const startRotate = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (!activeLayer || activeLayer.locked) return;
+    const centre = pointsCentre(activeLayer.points);
+    const m = toWorld(e);
+    setSelectedPointIndex(null);
+    setRotateDrag({
+        layerId: activeLayer.id,
+        centre,
+        startAngle: Math.atan2(m.y - centre.y, m.x - centre.x) * 180 / Math.PI,
+        startRotation: activeLayer.rotation ?? 0,
+        startPoints: activeLayer.points,
+    });
+  };
+
   const handleMouseMove = (e: React.MouseEvent) => {
+    if (rotateDrag) {
+        const m = toWorld(e);
+        const angle = Math.atan2(m.y - rotateDrag.centre.y, m.x - rotateDrag.centre.x) * 180 / Math.PI;
+        let rotation = rotateDrag.startRotation + angle - rotateDrag.startAngle;
+        if (e.shiftKey) rotation = Math.round(rotation / 15) * 15; // Shift: whole steps of 15°
+        rotation = normalizeAngle(rotation);
+        onUpdateLayer(rotateDrag.layerId, {
+            rotation,
+            points: rotatePoints(rotateDrag.startPoints, rotation - rotateDrag.startRotation, rotateDrag.centre),
+        });
+        return;
+    }
+
     const dx = e.clientX - lastPanRef.current.x;
     const dy = e.clientY - lastPanRef.current.y;
     lastPanRef.current = { x: e.clientX, y: e.clientY };
@@ -689,6 +744,7 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
   };
 
   const handleMouseUp = () => {
+    setRotateDrag(null);
     setIsPanning(false);
     setIsLayerDragging(false);
     setDraggedLayerId(null);
@@ -872,7 +928,7 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
         onMouseLeave={handleMouseUp}
         onDoubleClick={handleDoubleClick}
         style={{
-             cursor: isPanning ? 'grabbing' : (isLayerDragging ? 'move' : 'default'),
+             cursor: rotateDrag ? 'grabbing' : isPanning ? 'grabbing' : (isLayerDragging ? 'move' : 'default'),
              display: 'block' // Removed flex centering which caused offset issues
         }}
        >
@@ -890,6 +946,51 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
                     className="block pointer-events-none"
                     style={{ width: '100%', height: '100%' }}
                 />
+
+                {!isEditingBackground && mode === AppMode.MAPPING && activeLayer && !activeLayer.locked && activeLayer.points.length >= 3 && (() => {
+                    // The handle sits a little above the element's top edge, on the line through its middle,
+                    // and turns together with the element.
+                    const rotation = activeLayer.rotation ?? 0;
+                    const centre = rotateDrag?.layerId === activeLayer.id ? rotateDrag.centre : pointsCentre(activeLayer.points);
+                    const upright = rotatePoints(activeLayer.points, -rotation, centre);
+                    const top = centre.y - Math.min(...upright.map(p => p.y));
+                    const gap = 48 / transform.k;
+                    const r = rotation * Math.PI / 180;
+                    const up = { x: Math.sin(r), y: -Math.cos(r) };
+                    const edge = { x: centre.x + up.x * top, y: centre.y + up.y * top };
+                    const handle = { x: centre.x + up.x * (top + gap), y: centre.y + up.y * (top + gap) };
+                    const s = 1 / Math.max(transform.k, 0.5);
+                    return (
+                        <>
+                            <svg className="absolute top-0 left-0 overflow-visible pointer-events-none z-40" width={1} height={1}>
+                                <line x1={edge.x} y1={edge.y} x2={handle.x} y2={handle.y} stroke="#22d3ee" strokeWidth={1.5 / transform.k} strokeDasharray={`${4 / transform.k} ${3 / transform.k}`} />
+                            </svg>
+                            <div
+                                className="absolute top-0 left-0 w-7 h-7 -ml-3.5 -mt-3.5 pointer-events-auto z-50"
+                                style={{ transform: `translate(${handle.x}px, ${handle.y}px)`, cursor: rotateDrag ? 'grabbing' : 'grab' }}
+                                onMouseDown={startRotate}
+                                onDoubleClick={(e) => { e.stopPropagation(); onUpdateLayer(activeLayer.id, rotationUpdate(activeLayer, 0)); }}
+                                title={t('canvas.rotateHandle')}
+                                aria-label={t('canvas.rotateHandle')}
+                            >
+                                <div
+                                    className={`w-full h-full rounded-full border-2 ${rotateDrag ? 'border-yellow-400 bg-yellow-400/30' : 'border-cyan-400 bg-black/60'} hover:bg-cyan-400/80 transition-colors flex items-center justify-center shadow-lg text-white`}
+                                    style={{ transform: `scale(${s})` }}
+                                >
+                                    <RotateCw size={14} />
+                                </div>
+                                {rotateDrag && (
+                                    <div
+                                        className="absolute left-1/2 bottom-full mb-1 px-2 py-0.5 rounded bg-slate-900/95 border border-slate-600 text-xs font-mono text-yellow-300 whitespace-nowrap"
+                                        style={{ transform: `translateX(-50%) scale(${1 / transform.k})`, transformOrigin: 'bottom center' }}
+                                    >
+                                        {rotation}°
+                                    </div>
+                                )}
+                            </div>
+                        </>
+                    );
+                })()}
 
                 {!isEditingBackground && mode === AppMode.MAPPING && activeLayer && !activeLayer.locked && activeLayer.points.map((p, idx) => {
                     const nodeRef = getPointRef(p.id);

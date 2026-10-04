@@ -96,6 +96,7 @@ const HelpDialog: React.FC<HelpDialogProps> = ({ keyMappings, onClose }) => {
             <div>
               <Row what={t('help.mouse.dragDot')} does={t('help.mouse.dragDotDo')} />
               <Row what={t('help.mouse.dragPic')} does={t('help.mouse.dragPicDo')} />
+              <Row what={t('help.mouse.rotate')} does={t('help.mouse.rotateDo')} />
               <Row what={t('help.mouse.dragEmpty')} does={t('help.mouse.dragEmptyDo')} />
               <Row what={t('help.mouse.wheel')} does={t('help.mouse.wheelDo')} />
               <Row what={t('help.mouse.click')} does={t('help.mouse.clickDo')} />
@@ -115,6 +116,7 @@ const HelpDialog: React.FC<HelpDialogProps> = ({ keyMappings, onClose }) => {
               <Row what={<><Kbd>1</Kbd>…<Kbd>9</Kbd></>} does={t('help.keys.numbersDo')} />
               <Row what={<><Kbd>←</Kbd><Kbd>↑</Kbd><Kbd>↓</Kbd><Kbd>→</Kbd></>} does={t('help.keys.nudgeDo')} />
               <Row what={<><Kbd>Shift</Kbd>+<Kbd>←↑↓→</Kbd></>} does={t('help.keys.shiftDo')} />
+              <Row what={<><Kbd>Q</Kbd><Kbd>E</Kbd></>} does={t('help.keys.rotateDo')} />
               <Row what={<Kbd>Esc</Kbd>} does={t('help.keys.escDo')} />
               <p className="text-slate-400 text-sm mt-4">{t('help.keys.changeHint')}</p>
               <p className="text-slate-500 text-sm mt-1">{t('help.keys.note')}</p>
