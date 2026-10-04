@@ -1,15 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { AppMode, ContentType, Layer, Transform, KeyMap, ShortcutAction } from '../types';
+import { AppMode, ContentType, Layer, Transform, KeyMap, ShortcutAction, GridSettings } from '../types';
 import { generateTexture } from '../services/gemini';
 import { TranslationKey, formatKey, useI18n } from '../i18n';
 import LanguageSwitcher from './LanguageSwitcher';
 import MediaLibraryDialog from './MediaLibraryDialog';
+import GridSettingsPanel from './GridSettingsPanel';
 import { playVideos, playlistStep } from '../services/mediaLibrary';
 import {
   Upload, Monitor, Square, Layers, Sparkles, Move, Play, Image as ImageIcon, Save, FolderOpen, ExternalLink,
   Eye, EyeOff, Move3d, Plus, Trash2, ChevronUp, ChevronDown, Lock, Unlock, Settings, Copy, Keyboard,
   HelpCircle, Lightbulb, ArrowRight, Maximize, MousePointer2, ChevronRight, Download, Power, Link,
-  Film, SkipBack, SkipForward, Repeat
+  Film, SkipBack, SkipForward, Repeat, Frame
 } from 'lucide-react';
 
 interface ControlPanelProps {
@@ -51,6 +52,11 @@ interface ControlPanelProps {
 
   keyMappings: KeyMap;
   setKeyMappings: (map: KeyMap) => void;
+
+  gridDefaults: GridSettings;
+  setGridDefaults: (g: GridSettings) => void;
+  showProjectorFrame: boolean;
+  setShowProjectorFrame: (val: boolean) => void;
 }
 
 const STEPS: { mode: AppMode; n: number; title: TranslationKey; desc: TranslationKey; icon: React.ElementType; active: string; ring: string }[] = [
@@ -64,6 +70,7 @@ const SHORTCUTS: { id: ShortcutAction; label: TranslationKey }[] = [
   { id: 'PREV_LAYER', label: 'setup.keys.prev' },
   { id: 'BLACKOUT', label: 'setup.keys.blackout' },
   { id: 'TOGGLE_UI', label: 'setup.keys.toggleUi' },
+  { id: 'TOGGLE_FRAME', label: 'setup.keys.toggleFrame' },
 ];
 
 const SectionTitle: React.FC<{ icon: React.ElementType; children: React.ReactNode }> = ({ icon: Icon, children }) => (
@@ -115,7 +122,11 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   projectorSize,
   setProjectorSize,
   keyMappings,
-  setKeyMappings
+  setKeyMappings,
+  gridDefaults,
+  setGridDefaults,
+  showProjectorFrame,
+  setShowProjectorFrame
 }) => {
   const { t } = useI18n();
   const [texturePrompt, setTexturePrompt] = useState('');
@@ -479,6 +490,10 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
 
               <p className="text-xs text-slate-400 truncate">{t('map.selected.current', { name: sourceLabel(activeLayer) })}</p>
 
+              {activeLayer.source?.type === ContentType.SOLID_COLOR && (
+                <GridSettingsPanel layer={activeLayer} gridDefaults={gridDefaults} setGridDefaults={setGridDefaults} onUpdateLayer={onUpdateLayer} />
+              )}
+
               {activeLayer.playlist && activeLayer.playlist.items.length > 1 && (() => {
                 const playlist = activeLayer.playlist;
                 const step = (dir: 1 | -1) => {
@@ -590,6 +605,17 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
           })}</p>
           <button onClick={onOpenLive} className="w-full py-3 rounded-xl bg-slate-800 border border-slate-600 text-white font-semibold hover:bg-slate-700 flex items-center justify-center gap-2">
             <ExternalLink size={18} /> {t('setup.projector.open')}
+          </button>
+
+          <button
+            onClick={() => setShowProjectorFrame(!showProjectorFrame)}
+            aria-pressed={showProjectorFrame}
+            className={`w-full py-2.5 rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors ${
+              showProjectorFrame ? 'bg-rose-500 text-white hover:bg-rose-400' : 'bg-slate-800 border border-slate-600 text-slate-200 hover:bg-slate-700'
+            }`}
+          >
+            <Frame size={18} /> {showProjectorFrame ? t('live.frame.hide') : t('live.frame.show')}
+            <span className="text-xs font-mono opacity-70">({formatKey(keyMappings.TOGGLE_FRAME, t)})</span>
           </button>
 
           <section className="space-y-3">

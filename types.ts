@@ -47,6 +47,20 @@ export interface PlaybackState {
   duration: number;
 }
 
+// How the green grid is drawn on an element. Sizes are kept in centimetres; `unit` only changes how they are shown.
+export interface GridSettings {
+  unit: 'm' | 'cm';
+  width: number; // Element width (cm)
+  height: number; // Element height (cm)
+  mode: 'size' | 'count'; // Pick the cell size and count the cells, or pick the cell count and work out the size
+  cellWidth: number; // cm, used in 'size' mode
+  cellHeight: number; // cm, used in 'size' mode
+  columns: number; // used in 'count' mode
+  rows: number; // used in 'count' mode
+  frame: boolean; // Draw a frame around the whole element
+  cellsTouch: boolean; // true: neighbouring cells share one line; false: every cell has its own frame with a gap
+}
+
 export interface Layer {
   id: string;
   name: string;
@@ -58,6 +72,7 @@ export interface Layer {
   playlist?: Playlist | null;
   points: ControlPoint[];
   playback: PlaybackState;
+  grid?: GridSettings | null; // This element's own grid; when empty the project's default grid is used
 }
 
 export interface ProjectorState {
@@ -76,7 +91,7 @@ export enum AppMode {
 }
 
 // Shortcuts
-export type ShortcutAction = 'NEXT_LAYER' | 'PREV_LAYER' | 'BLACKOUT' | 'TOGGLE_UI';
+export type ShortcutAction = 'NEXT_LAYER' | 'PREV_LAYER' | 'BLACKOUT' | 'TOGGLE_UI' | 'TOGGLE_FRAME';
 
 export type KeyMap = {
   [action in ShortcutAction]: string;

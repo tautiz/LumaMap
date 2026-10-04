@@ -1,4 +1,4 @@
-import { KeyMap, Layer, ProjectionSource, Transform } from '../types';
+import { GridSettings, KeyMap, Layer, ProjectionSource, Transform } from '../types';
 
 // A project with its media files kept as Blobs, so nothing has to be uploaded again after opening.
 export interface SavedProject {
@@ -8,6 +8,7 @@ export interface SavedProject {
   showBackgroundInLive: boolean;
   projectorSize: { w: number; h: number };
   keyMappings?: KeyMap;
+  gridDefaults?: GridSettings;
 }
 
 const DB_NAME = 'lumamap';
@@ -143,6 +144,7 @@ export const exportShowFile = (project: SavedProject): Blob => {
     showBackgroundInLive: project.showBackgroundInLive,
     projectorSize: project.projectorSize,
     keyMappings: project.keyMappings,
+    gridDefaults: project.gridDefaults,
     files,
   }));
   const length = new Uint8Array(4);
@@ -183,6 +185,7 @@ export const parseShowFile = (buffer: ArrayBuffer): SavedProject => {
     showBackgroundInLive: !!data.showBackgroundInLive,
     projectorSize: data.projectorSize,
     keyMappings: data.keyMappings,
+    gridDefaults: data.gridDefaults,
   });
 };
 
