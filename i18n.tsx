@@ -101,6 +101,9 @@ const lt = {
   'welcome.start': 'Pradėkime!',
 
   'receiver.waiting': 'Projektoriaus langas • Laukiama valdymo lango...',
+  'receiver.noEditor': 'Valdymo langas nerastas. Šis langas rodo tik tai, kas atidaryta LumaMap kitame šios pačios naršyklės lange. Atidaryk LumaMap ir spausk „Atidaryti projektoriaus langą“. Kad pasirodymas rodytųsi ir be valdymo lango, paspausk „Išsaugoti“.',
+  'receiver.savedShow': 'Rodomas išsaugotas pasirodymas • Valdymo langas neprijungtas',
+  'receiver.fullscreenHint': 'Dukart spustelėk arba spausk F, kad būtų visas ekranas',
 
   'show.title': 'Automatinis pasirodymas',
   'show.hint': 'Pirma paspausk „Išsaugoti“. Tada atidarius nuorodą žemiau, pasirodymas prasidės pats, be jokio valdymo. Failu gali perkelti pasirodymą su visais vaizdo įrašais į kitą įrenginį.',
@@ -129,7 +132,7 @@ const lt = {
   'help.tab.keys': 'Klaviatūra',
   'help.tab.tips': 'Patarimai',
   'help.start.what': 'LumaMap leidžia projektoriumi rodyti paveikslėlius ir vaizdo įrašus tiksliai ant sienos, dėžės ar kito daikto.',
-  'help.start.s1': '„Paruošk“: įkelk sienos nuotrauką ir paspausk „Atidaryti projektoriaus langą“. Nutempk tą langą į projektoriaus ekraną ir paspausk F11.',
+  'help.start.s1': '„Paruošk“: įkelk sienos nuotrauką ir paspausk „Atidaryti projektoriaus langą“. Nutempk tą langą į projektoriaus ekraną ir dukart jį spustelėk (arba spausk F), kad būtų visas ekranas.',
   'help.start.s2': '„Pritaikyk“: pasirink sluoksnį, įkelk paveikslėlį ar vaizdo įrašą ir tempk taškus, kol vaizdas tiks ant sienos. Kiekvienas sluoksnis yra atskiras paveikslėlis.',
   'help.start.s3': '„Rodyk“: valdymas pasislepia ir prasideda pasirodymas. Klavišais keisk paveikslėlius.',
   'help.start.s4': 'Paspausk „Išsaugoti“, kad kitą kartą nereikėtų visko daryti iš naujo.',
@@ -265,6 +268,9 @@ const en: Dictionary = {
   'welcome.start': 'Let’s start!',
 
   'receiver.waiting': 'Projector window • Waiting for the control window...',
+  'receiver.noEditor': 'No control window found. This window only shows what LumaMap has open in another window of this same browser. Open LumaMap and press “Open projector window”. To have the show play without a control window, press “Save”.',
+  'receiver.savedShow': 'Showing the saved show • No control window connected',
+  'receiver.fullscreenHint': 'Double-click or press F for full screen',
 
   'show.title': 'Automatic show',
   'show.hint': 'Press “Save” first. Opening the link below then starts the show by itself, with no controls. The file moves a show, videos included, to another device.',
@@ -293,7 +299,7 @@ const en: Dictionary = {
   'help.tab.keys': 'Keyboard',
   'help.tab.tips': 'Tips',
   'help.start.what': 'LumaMap lets you use a projector to show pictures and videos exactly on a wall, a box or another object.',
-  'help.start.s1': '“Prepare”: upload a photo of the wall and press “Open projector window”. Drag that window to the projector screen and press F11.',
+  'help.start.s1': '“Prepare”: upload a photo of the wall and press “Open projector window”. Drag that window to the projector screen and double-click it (or press F) for full screen.',
   'help.start.s2': '“Fit”: pick a layer, upload a picture or video and drag the dots until it fits the wall. Each layer is a separate picture.',
   'help.start.s3': '“Show”: the controls hide and the show begins. Use the keys to switch pictures.',
   'help.start.s4': 'Press “Save” so you don’t have to start over next time.',

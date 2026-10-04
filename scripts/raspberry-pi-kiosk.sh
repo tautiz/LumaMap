@@ -23,8 +23,10 @@ for _ in \$(seq 60); do
   curl -sf --max-time 3 -o /dev/null "$URL" && break
   sleep 2
 done
+# The GPU flags let Chromium draw the canvas and decode video on the Pi's GPU instead of the CPU.
 exec "$BROWSER" --kiosk --noerrdialogs --disable-infobars --disable-session-crashed-bubble \\
-  --autoplay-policy=no-user-gesture-required --password-store=basic "$URL"
+  --autoplay-policy=no-user-gesture-required --password-store=basic \\
+  --ignore-gpu-blocklist --enable-gpu-rasterization --enable-zero-copy "$URL"
 SCRIPT
 chmod +x "$LAUNCHER"
 

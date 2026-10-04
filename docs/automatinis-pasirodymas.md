@@ -35,6 +35,19 @@ Reikės: Raspberry Pi 4 arba 5 (2 GB RAM pakanka), microSD kortelės, maitinimo 
 Išjungti automatinį paleidimą: `rm ~/.config/autostart/lumamap-show.desktop`. Uždaryti pasirodymą dabar: `Alt+F4`.
 Klaviatūra ar Bluetooth pultelis pasirodymo metu veikia kaip įprastai (rodyklės, 0, skaičiai 1–9).
 
+## Valdymas Raspberry Pi su monitoriumi ir projektoriumi
+
+Raspberry Pi 4 ir 5 turi du HDMI lizdus: į vieną junk monitorių, į kitą projektorių.
+
+1. Monitoriuje atidaryk LumaMap ir spausk **„Atidaryti projektoriaus langą“**. Jei Chromium paklaus leidimo
+   valdyti langus, leisk: tada langas pats atsidarys projektoriaus ekrane.
+2. Projektoriaus lange dukart spustelėk (arba spausk `F`), kad būtų visas ekranas.
+3. Viską, ką darai monitoriuje, projektorius rodo iš karto, o vaizdo įrašai abiejuose languose groja sinchroniškai.
+   Klavišai, paspausti projektoriaus lange (rodyklės, 0, 1–9), valdo pasirodymą taip pat, kaip valdymo lange.
+
+Projektoriaus langas mato tik tos pačios naršyklės langus tame pačiame įrenginyje. Jei jis atidarytas be valdymo lango,
+jis parodo šioje naršyklėje išsaugotą pasirodymą (arba užrašą, ką daryti, jei nieko neišsaugota).
+
 ## Su Chromecast (1 kartos): galima, bet nerekomenduojama
 
 - **Chromecast pats nieko nepaleidžia.** Įjungtas į elektrą jis tik rodo užsklandą ir laukia, kol kitas įrenginys

@@ -25,6 +25,9 @@ interface SurfaceCanvasProps {
 
   // Projector Resolution
   projectorSize?: { w: number, h: number };
+
+  // Optional shared map of layer id -> video element, so the app can read and correct playback positions.
+  videoRegistry?: Map<string, HTMLVideoElement>;
 }
 
 const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
@@ -38,7 +41,8 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
   backgroundTransform = { x: 0, y: 0, k: 1 },
   onBackgroundTransformChange,
   isEditingBackground = false,
-  projectorSize
+  projectorSize,
+  videoRegistry
 }) => {
   const { t } = useI18n();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -47,7 +51,12 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
   
   // Resource Cache
   const [imageCache] = useState<Map<string, HTMLImageElement>>(new Map());
-  const [videoCache] = useState<Map<string, HTMLVideoElement>>(new Map());
+  const [ownVideoCache] = useState<Map<string, HTMLVideoElement>>(new Map());
+  const videoCache = videoRegistry ?? ownVideoCache;
+  // Last seek applied per layer, so a video only jumps when someone actually seeks or restarts it.
+  const lastSeekRef = useRef<Map<string, string>>(new Map());
+  // Set when the picture must be redrawn (see the render loop).
+  const dirtyRef = useRef(true);
   const gridCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Global Pan and Zoom State (Camera)
@@ -98,7 +107,7 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
             if (!imageCache.has(layer.source.url)) {
                 const img = new Image();
                 img.src = layer.source.url;
-                img.onload = () => imageCache.set(layer.source.url, img);
+                img.onload = () => { imageCache.set(layer.source.url, img); dirtyRef.current = true; };
             }
         }
 
@@ -142,10 +151,14 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
                 video.pause();
             }
 
-            const timeDiff = Math.abs(video.currentTime - layer.playback.currentTime);
-            // Allow a larger drift during transitions (video restart) to avoid fighting
-            if (timeDiff > 1.0) {
-                 video.currentTime = layer.playback.currentTime;
+            // Seek only when the requested position changed. Comparing with the playing position instead
+            // would throw every playing video back to the start on each edit (and on each projector sync).
+            const seekKey = `${layer.playback.currentTime}|${layer.playback.seekAt ?? 0}`;
+            if (lastSeekRef.current.get(layer.id) !== seekKey) {
+                lastSeekRef.current.set(layer.id, seekKey);
+                if (Math.abs(video.currentTime - layer.playback.currentTime) > 0.05) {
+                    video.currentTime = layer.playback.currentTime;
+                }
             }
         }
     });
@@ -195,24 +208,49 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
   }, [onDimensionsChange, projectorSize]);
 
   // --- Render Loop ---
+  //
+  // One loop for the component's whole life. It reads the latest props from a ref instead of being
+  // torn down and restarted on every state change, and it only redraws when something changed or a
+  // video is on screen. Both matter on a Raspberry Pi: a still picture costs no GPU time at all.
+
+  const sceneRef = useRef({ layers, activeLayer, mode, k: transform.k, isEditingBackground, containerSize });
+  sceneRef.current = { layers, activeLayer, mode, k: transform.k, isEditingBackground, containerSize };
+  useEffect(() => { dirtyRef.current = true; }, [layers, activeLayer, mode, transform.k, isEditingBackground, containerSize]);
 
   useEffect(() => {
     let animationFrameId: number;
     const canvas = canvasRef.current;
-    const ctx = canvas?.getContext('2d', { alpha: false }); // Optimize for no transparency on bg if possible, but we need it for layers
+    const ctx = canvas?.getContext('2d', { alpha: false });
+    // Patterns of still textures (pictures, the grid) are made once; a video needs a new one every frame.
+    const staticPatterns = new WeakMap<CanvasImageSource, CanvasPattern | null>();
 
     const render = () => {
+      animationFrameId = requestAnimationFrame(render);
       if (!canvas || !ctx) return;
 
-      // Ensure canvas DOM size matches logical size
-      if (canvas.width !== containerSize.w || canvas.height !== containerSize.h) {
-        canvas.width = containerSize.w;
-        canvas.height = containerSize.h;
+      const { layers, activeLayer, mode, k, isEditingBackground, containerSize } = sceneRef.current;
+      const hasVideo = layers.some(l => l.visible && l.source?.type === ContentType.VIDEO);
+      if (!dirtyRef.current && !hasVideo) return;
+      dirtyRef.current = false;
+
+      // Draw at the size the canvas is actually shown (zoom x screen density), never above the logical size.
+      // The projector window shows the scene at 0.8, so this skips about a third of the pixels there.
+      const dpr = window.devicePixelRatio || 1;
+      const s = Math.min(1, Math.ceil(k * dpr * 20) / 20);
+      const w = containerSize.w;
+      const h = containerSize.h;
+      const pixelW = Math.max(1, Math.round(w * s));
+      const pixelH = Math.max(1, Math.round(h * s));
+      if (canvas.width !== pixelW || canvas.height !== pixelH) {
+        canvas.width = pixelW;
+        canvas.height = pixelH;
       }
 
-      // Clear
+      // Everything below is in logical (projector) pixels.
+      ctx.setTransform(s, 0, 0, s, 0, 0);
+      ctx.globalAlpha = 1;
       ctx.fillStyle = '#000000';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillRect(0, 0, w, h);
 
       // Render layers
       layers.forEach(layer => {
@@ -233,6 +271,7 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
           ctx.globalAlpha = finalOpacity;
 
           let texture: CanvasImageSource | null = null;
+          let isStatic = true;
           let texW = 1000;
           let texH = 1000;
 
@@ -240,6 +279,7 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
               const vid = videoCache.get(layer.id);
               if (vid && vid.readyState >= 2) {
                   texture = vid;
+                  isStatic = false;
                   texW = vid.videoWidth;
                   texH = vid.videoHeight;
               }
@@ -258,9 +298,14 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
 
           if (texture) {
              let pattern: CanvasPattern | null = null;
-             try {
-                 pattern = ctx.createPattern(texture, 'repeat');
-             } catch (e) {}
+             if (isStatic && staticPatterns.has(texture)) {
+                 pattern = staticPatterns.get(texture) ?? null;
+             } else {
+                 try {
+                     pattern = ctx.createPattern(texture, 'repeat');
+                 } catch (e) {}
+                 if (isStatic) staticPatterns.set(texture, pattern);
+             }
 
              // Optimization: Use imageSmoothing for smoother video, but sometimes 'false' reduces blur at edges.
              ctx.imageSmoothingEnabled = true;
@@ -316,8 +361,8 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
                  
                  ctx.clip();
                  
-                 // Reset transform to draw the texture
-                 ctx.setTransform(a, b, c, d, e, f);
+                 // Map texture space onto the triangle (on top of the drawing scale)
+                 ctx.setTransform(a * s, b * s, c * s, d * s, e * s, f * s);
 
                  if (pattern) {
                      ctx.fillStyle = pattern;
@@ -341,22 +386,18 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
       // --- Draw Scene Bounds & Wireframe (Overlay) ---
       
       // Bounds (Visible in SETUP and MAPPING)
-      // Only draw if we are NOT in Live (or if we are editing background in non-live)
-      // The prompt asks for visibility in SETUP mode too.
       if ((mode === AppMode.MAPPING || mode === AppMode.SETUP) && !isEditingBackground) {
           ctx.save();
-          ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform just in case
-          
+          ctx.globalAlpha = 1;
           ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
           ctx.lineWidth = 2;
           ctx.setLineDash([8, 8]);
-          // Draw rect
-          ctx.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
+          ctx.strokeRect(1, 1, w - 2, h - 2);
           
           // Label
           ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
           ctx.font = '12px monospace';
-          ctx.fillText(`BOUNDS: ${canvas.width}x${canvas.height}`, 10, 20);
+          ctx.fillText(`BOUNDS: ${w}x${h}`, 10, 20);
           ctx.restore();
       }
 
@@ -365,7 +406,7 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
           const triangles = triangulate(activeLayer.points);
           ctx.globalAlpha = 1;
           ctx.strokeStyle = '#22d3ee';
-          ctx.lineWidth = 1 / transform.k;
+          ctx.lineWidth = 1 / k;
           ctx.beginPath();
           for (let i = 0; i < triangles.length; i += 3) {
              const p0 = activeLayer.points[triangles[i]];
@@ -380,13 +421,11 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
           }
           ctx.stroke();
       }
-
-      animationFrameId = requestAnimationFrame(render);
     };
 
     render();
     return () => cancelAnimationFrame(animationFrameId);
-  }, [containerSize, layers, activeLayerId, mode, transform.k, videoCache, imageCache, isEditingBackground]);
+  }, [videoCache, imageCache]);
 
   // --- Keyboard Control (Nudge) ---
   useEffect(() => {
@@ -651,7 +690,10 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
           newPlayback.volume = value;
           if (value > 0) newPlayback.isMuted = false;
       }
-      if (action === 'seek' && value !== undefined) newPlayback.currentTime = value;
+      if (action === 'seek' && value !== undefined) {
+          newPlayback.currentTime = value;
+          newPlayback.seekAt = Date.now();
+      }
       
       onUpdateLayer(activeLayer.id, { playback: newPlayback });
   };
