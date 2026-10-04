@@ -35,7 +35,8 @@ export interface PlaybackState {
   isPlaying: boolean;
   volume: number;
   isMuted: boolean;
-  currentTime: number;
+  currentTime: number; // Position to seek to (applied only when it or seekAt changes)
+  seekAt?: number; // Bumped on every seek or restart, so seeking to the same time again still applies
   duration: number;
 }
 

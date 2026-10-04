@@ -184,6 +184,92 @@ const App: React.FC = () => {
     });
   };
 
+  const toggleFullscreen = useCallback(() => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(() => {});
+    } else {
+      document.exitFullscreen();
+    }
+  }, []);
+
+  // --- Projector window sync ---
+  //
+  // The control window and the projector window (?live=true) talk over a BroadcastChannel, which only
+  // reaches windows of the same browser on the same computer. The control window sends its state when
+  // it changes (at most once per frame) and the playing position of its videos every second. The
+  // projector window draws that state and sends its key presses back, so a keyboard or remote plugged
+  // into the projector computer controls the show as well.
+
+  const [receiverConnected, setReceiverConnected] = useState(false);
+  const [receiverFallback, setReceiverFallback] = useState<'none' | 'saved' | 'nothing'>('none');
+  const videoRegistry = useRef(new Map<string, HTMLVideoElement>()).current;
+
+  // Control window: a stable id for every media file, so the projector window can tell which ones it already has.
+  const mediaIds = useRef(new WeakMap<Blob, string>());
+  const mediaIdOf = (file: Blob) => {
+    let id = mediaIds.current.get(file);
+    if (!id) {
+      id = Math.random().toString(36).slice(2);
+      mediaIds.current.set(file, id);
+    }
+    return id;
+  };
+
+  // Projector window: one object URL per media file. Making a new URL on every update made pictures
+  // reload and videos restart on every change, which showed up as lag and black frames.
+  const receiverUrls = useRef(new Map<string, string>());
+  const receiverUrl = (id: string | undefined, file: unknown, fallback: string) => {
+    if (!id || !(file instanceof Blob)) return fallback;
+    let url = receiverUrls.current.get(id);
+    if (!url) {
+      url = URL.createObjectURL(file);
+      receiverUrls.current.set(id, url);
+    }
+    return url;
+  };
+
+  const buildSyncPayload = () => {
+    const w = projectorSize.w;
+    const h = projectorSize.h;
+    return {
+      layers: layers.map(l => ({
+        ...l,
+        source: l.source ? { ...l.source, mediaId: l.source.file ? mediaIdOf(l.source.file) : undefined } : null,
+        normPoints: l.points.map(p => ({ ...p, nx: p.x / w, ny: p.y / h })),
+        points: undefined
+      })),
+      refSize: { w, h },
+      bgUrl: backgroundUrl,
+      bgFile: backgroundFile,
+      bgId: backgroundFile ? mediaIdOf(backgroundFile) : undefined,
+      bgTransform: backgroundTransform,
+      showBg: showBackgroundInLive,
+      projSize: projectorSize
+    };
+  };
+  // Always the latest state, also inside long-lived listeners (the old handler answered with the first render's state).
+  const buildSyncRef = useRef(buildSyncPayload);
+  buildSyncRef.current = buildSyncPayload;
+
+  const syncPendingRef = useRef(false);
+  const scheduleSync = useCallback(() => {
+    if (isReceiver || syncPendingRef.current) return;
+    syncPendingRef.current = true;
+    let sent = false;
+    const flush = () => {
+      if (sent) return;
+      sent = true;
+      syncPendingRef.current = false;
+      channelRef.current?.postMessage({ type: 'SYNC', payload: buildSyncRef.current() });
+    };
+    // Once per frame while dragging; the timer covers a window that is not painting.
+    requestAnimationFrame(flush);
+    window.setTimeout(flush, 100);
+  }, [isReceiver]);
+
+  // Keys pressed in the projector window, run by the control window (set by the shortcut handler below).
+  const keyActionRef = useRef<((key: string) => void) | null>(null);
+
   useEffect(() => {
     const channel = new BroadcastChannel(CHANNEL_NAME);
     channelRef.current = channel;
@@ -193,36 +279,69 @@ const App: React.FC = () => {
 
       if (isReceiver) {
         if (type === 'SYNC') {
-            const { layers: normLayers, refSize, bgUrl, bgTransform, showBg, projSize } = payload;
-            
+            const { layers: normLayers, bgUrl, bgFile, bgId, bgTransform, showBg, projSize } = payload;
+            setReceiverConnected(true);
+            setReceiverFallback('none');
+
             if (projSize) setProjectorSize(projSize);
 
-            if (normLayers && refSize) {
+            const usedIds = new Set<string>();
+            if (bgId) usedIds.add(bgId);
+
+            if (normLayers) {
                 // Use the broadcasted resolution to de-normalize
                 const w = projSize ? projSize.w : canvasDims.current.w;
                 const h = projSize ? projSize.h : canvasDims.current.h;
 
-                const restoredLayers: Layer[] = normLayers.map((nl: any) => ({
-                    ...nl,
-                    source: nl.source && nl.source.file && nl.source.file instanceof File 
-                        ? { ...nl.source, url: URL.createObjectURL(nl.source.file) } 
-                        : nl.source,
-                    points: nl.normPoints.map((p: any) => ({
-                        ...p,
-                        x: p.nx * w,
-                        y: p.ny * h
-                    }))
-                }));
+                const restoredLayers: Layer[] = normLayers.map((nl: any) => {
+                    if (nl.source?.mediaId) usedIds.add(nl.source.mediaId);
+                    return {
+                        ...nl,
+                        source: nl.source
+                            ? { ...nl.source, url: receiverUrl(nl.source.mediaId, nl.source.file, nl.source.url) }
+                            : nl.source,
+                        points: nl.normPoints.map((p: any) => ({
+                            ...p,
+                            x: p.nx * w,
+                            y: p.ny * h
+                        }))
+                    };
+                });
                 setLayers(restoredLayers);
             }
 
-            if (bgUrl !== undefined) setBackgroundUrl(bgUrl);
+            setBackgroundUrl(bgId ? receiverUrl(bgId, bgFile, bgUrl) : bgUrl ?? null);
             if (bgTransform !== undefined) setBackgroundTransform(bgTransform);
             if (showBg !== undefined) setShowBackgroundInLive(showBg);
+
+            // Free files the control window no longer uses.
+            for (const [id, url] of receiverUrls.current) {
+                if (!usedIds.has(id)) {
+                    URL.revokeObjectURL(url);
+                    receiverUrls.current.delete(id);
+                }
+            }
+        } else if (type === 'VIDEO_TIME') {
+            // Keep the projector's videos at the same position as the control window's.
+            const latency = Math.max(0, Date.now() - payload.sentAt) / 1000;
+            for (const [id, time] of Object.entries(payload.times as Record<string, number>)) {
+                const video = videoRegistry.get(id);
+                if (!video || video.paused || video.readyState < 2) continue;
+                const d = video.duration;
+                let target = time + latency;
+                let diff = video.currentTime - target;
+                if (Number.isFinite(d) && d > 0) {
+                    target %= d;
+                    diff = ((((video.currentTime - target) + d / 2) % d) + d) % d - d / 2; // looping videos wrap around
+                }
+                if (Math.abs(diff) > 0.3) video.currentTime = target;
+            }
         }
       } else {
         if (type === 'REQUEST_SYNC') {
-           broadcastState();
+           scheduleSync();
+        } else if (type === 'KEY') {
+           keyActionRef.current?.(payload.key);
         }
       }
     };
@@ -236,45 +355,67 @@ const App: React.FC = () => {
     };
   }, [isReceiver]);
 
-  const broadcastState = useCallback(() => {
-     if (isReceiver || !channelRef.current) return;
-
-     // If using explicit projector size, normalize against that, otherwise current canvas dims
-     const w = projectorSize.w;
-     const h = projectorSize.h;
-
-     const normLayers = layers.map(l => ({
-         ...l,
-         normPoints: l.points.map(p => ({ ...p, nx: p.x / w, ny: p.y / h })),
-         points: undefined
-     }));
-
-     channelRef.current.postMessage({
-         type: 'SYNC',
-         payload: {
-             layers: normLayers,
-             refSize: { w, h },
-             bgUrl: backgroundUrl,
-             bgTransform: backgroundTransform,
-             showBg: showBackgroundInLive,
-             projSize: projectorSize
-         }
-     });
-  }, [layers, isReceiver, backgroundUrl, backgroundTransform, showBackgroundInLive, projectorSize]);
-
   useEffect(() => {
-      if (!isReceiver) {
-          broadcastState();
+      scheduleSync();
+  }, [layers, scheduleSync, backgroundUrl, backgroundFile, backgroundTransform, showBackgroundInLive, projectorSize]);
+
+  // Control window: report where its videos are, once a second.
+  useEffect(() => {
+    if (isReceiver) return;
+    const timer = window.setInterval(() => {
+      const times: Record<string, number> = {};
+      let any = false;
+      for (const [id, video] of videoRegistry) {
+        if (!video.paused && video.readyState >= 2) {
+          times[id] = video.currentTime;
+          any = true;
+        }
       }
-  }, [layers, broadcastState, isReceiver, backgroundUrl, backgroundTransform, showBackgroundInLive, projectorSize]);
+      if (any) channelRef.current?.postMessage({ type: 'VIDEO_TIME', payload: { times, sentAt: Date.now() } });
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [isReceiver]);
 
+  // Projector window opened without a control window (e.g. after a restart): show the show saved in
+  // this browser instead of a black screen. A control window that opens later takes over again.
   useEffect(() => {
-     if (!isReceiver) return;
-     const handleResize = () => {
-         channelRef.current?.postMessage({ type: 'REQUEST_SYNC' });
-     };
-     window.addEventListener('resize', handleResize);
-     return () => window.removeEventListener('resize', handleResize);
+    if (!isReceiver || receiverConnected) return;
+    const timer = window.setTimeout(async () => {
+      try {
+        const project = await loadFromBrowser();
+        if (project) {
+          applyProject(project);
+          setReceiverFallback('saved');
+        } else {
+          setReceiverFallback('nothing');
+        }
+      } catch (e) {
+        console.error("Saved show load failed", e);
+        setReceiverFallback('nothing');
+      }
+    }, 2500);
+    return () => window.clearTimeout(timer);
+  }, [isReceiver, receiverConnected]);
+
+  // Projector window: double click or F for full screen; hide the mouse pointer when it is not moving.
+  const [receiverPointer, setReceiverPointer] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(!!document.fullscreenElement);
+  useEffect(() => {
+    if (!isReceiver) return;
+    let timer: number | undefined;
+    const onMove = () => {
+      setReceiverPointer(true);
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => setReceiverPointer(false), 2500);
+    };
+    const onFullscreen = () => setIsFullscreen(!!document.fullscreenElement);
+    window.addEventListener('mousemove', onMove);
+    document.addEventListener('fullscreenchange', onFullscreen);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      document.removeEventListener('fullscreenchange', onFullscreen);
+      window.clearTimeout(timer);
+    };
   }, [isReceiver]);
 
   // --- External Control API & Shortcuts ---
@@ -381,6 +522,7 @@ const App: React.FC = () => {
                                 let newPlayback = { ...l.playback };
                                 if (!l.visible && l.source?.type === ContentType.VIDEO) {
                                     newPlayback.currentTime = 0;
+                                    newPlayback.seekAt = Date.now();
                                     newPlayback.isPlaying = true;
                                 }
                                 return { 
@@ -410,21 +552,18 @@ const App: React.FC = () => {
     };
 
     // 3. Main Keyboard Handler
-    const handleKeyDown = (e: KeyboardEvent) => {
-        const target = e.target as HTMLElement;
-        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
-
+    const handleKey = (key: string) => {
         // Number keys always directly toggle layers 1-9
-        if (e.key >= '1' && e.key <= '9') {
-            const index = parseInt(e.key) - 1;
+        if (key >= '1' && key <= '9') {
+            const index = parseInt(key) - 1;
             window.LumaAPI.toggleLayerVisibility(index);
             return;
         }
 
         // Map key to Action
         let action: ShortcutAction | null = null;
-        for (const [act, key] of Object.entries(keyMappings)) {
-            if (key === e.key) {
+        for (const [act, mapped] of Object.entries(keyMappings)) {
+            if (mapped === key) {
                 action = act as ShortcutAction;
                 break;
             }
@@ -434,7 +573,7 @@ const App: React.FC = () => {
 
         // If in Mapping mode, prevent navigational/solo shortcuts from interfering with arrow movement
         // UNLESS the mapped key is NOT an arrow key (e.g. Spacebar).
-        if (mode === AppMode.MAPPING && e.key.startsWith('Arrow')) {
+        if (mode === AppMode.MAPPING && key.startsWith('Arrow')) {
             // Let the Canvas handle fine-tuning coordinates
             return;
         }
@@ -464,14 +603,36 @@ const App: React.FC = () => {
                  break;
         }
 
-        if (mode === AppMode.SETUP && e.key === 'Escape') {
+        if (mode === AppMode.SETUP && key === 'Escape') {
             setUiVisible(true);
         }
+    };
+    keyActionRef.current = handleKey;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+        const target = e.target as HTMLElement;
+        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+
+        if (isReceiver && receiverConnected) {
+            // The projector window only shows; its keys go to the control window, which runs the show.
+            if ((e.key === 'f' || e.key === 'F') && !Object.values(keyMappings).includes(e.key)) {
+                toggleFullscreen();
+                return;
+            }
+            if (e.key.startsWith('Arrow') || e.key === ' ') e.preventDefault();
+            channelRef.current?.postMessage({ type: 'KEY', payload: { key: e.key } });
+            return;
+        }
+        if (isReceiver && (e.key === 'f' || e.key === 'F') && !Object.values(keyMappings).includes(e.key)) {
+            toggleFullscreen();
+            return;
+        }
+        handleKey(e.key);
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [layers, mode, isReceiver, keyMappings]);
+  }, [layers, mode, isReceiver, receiverConnected, keyMappings, toggleFullscreen]);
 
   useEffect(() => {
     if (mode === AppMode.LIVE || isReceiver) {
@@ -488,18 +649,23 @@ const App: React.FC = () => {
     setBackgroundTransform({ x: 0, y: 0, k: 1 });
   };
 
-  const toggleFullscreen = useCallback(() => {
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen();
-    } else {
-      document.exitFullscreen();
-    }
-  }, []);
-
-  const handleOpenLive = () => {
+  const handleOpenLive = async () => {
       // Open with specific size if possible, though browsers restrict this
       const features = `width=${projectorSize.w},height=${projectorSize.h}`;
-      window.open(window.location.href.split('?')[0] + '?live=true', 'LumaMapLive', features);
+      const win = window.open(window.location.href.split('?')[0] + '?live=true', 'LumaMapLive', features);
+      // With a second screen (e.g. a Raspberry Pi with a monitor and a projector), move the window onto
+      // the other screen. Chromium asks once for the "window management" permission; elsewhere this is skipped.
+      const w = window as any;
+      if (!win || !w.screen?.isExtended || !w.getScreenDetails) return;
+      try {
+          const details = await w.getScreenDetails();
+          const other = details.screens.find((sc: any) => sc !== details.currentScreen);
+          if (!other) return;
+          win.moveTo(other.availLeft, other.availTop);
+          win.resizeTo(other.availWidth, other.availHeight);
+      } catch (e) {
+          console.warn("Could not move the projector window to the other screen", e);
+      }
   };
 
   const currentProject = (): SavedProject => ({
@@ -609,7 +775,10 @@ const App: React.FC = () => {
   const shouldShowBackground = !!backgroundUrl && ((!isReceiver && mode !== AppMode.LIVE) || showBackgroundInLive);
 
   return (
-    <div className={`w-screen h-screen bg-black overflow-hidden flex items-center justify-center ${isShow ? 'cursor-none' : ''}`}>
+    <div
+      className={`w-screen h-screen bg-black overflow-hidden flex items-center justify-center ${isShow || (isReceiver && !receiverPointer) ? 'cursor-none' : ''}`}
+      onDoubleClick={isReceiver ? toggleFullscreen : undefined}
+    >
       {!isReceiver && !isShow && uiVisible && (
         <ControlPanel
           mode={mode}
@@ -668,6 +837,7 @@ const App: React.FC = () => {
           isEditingBackground={!isReceiver && isEditingBackground}
 
           projectorSize={projectorSize}
+          videoRegistry={videoRegistry}
         />
         
         {!isReceiver && mode === AppMode.SETUP && !backgroundUrl && !welcomeDismissed && (
@@ -719,9 +889,22 @@ const App: React.FC = () => {
             </div>
         )}
 
-        {isReceiver && (
-            <div className="absolute top-4 left-4 text-white/20 text-xs pointer-events-none z-[200]">
-                {t('receiver.waiting')}
+        {isReceiver && !receiverConnected && receiverFallback !== 'saved' && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 p-8 pointer-events-none z-[200] text-center">
+                <p className="text-white/70 text-2xl">{t('receiver.waiting')}</p>
+                {receiverFallback === 'nothing' && <p className="text-white/50 text-lg max-w-2xl">{t('receiver.noEditor')}</p>}
+            </div>
+        )}
+
+        {isReceiver && receiverFallback === 'saved' && receiverPointer && (
+            <div className="absolute top-4 left-4 text-white/40 text-sm pointer-events-none z-[200]">
+                {t('receiver.savedShow')}
+            </div>
+        )}
+
+        {isReceiver && !isFullscreen && receiverPointer && (
+            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full bg-slate-900/90 border border-slate-600 text-white text-sm pointer-events-none z-[200]">
+                {t('receiver.fullscreenHint')}
             </div>
         )}
       </main>

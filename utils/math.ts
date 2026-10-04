@@ -86,7 +86,19 @@ export function solveAffine(
     return [a, b, c, d, e, f];
 }
 
+// Point arrays are replaced (never mutated) on every edit, so the array itself is a safe cache key.
+// This keeps the render loop from re-triangulating every layer on every frame.
+const triangleCache = new WeakMap<ControlPoint[], number[]>();
+
 export function triangulate(points: ControlPoint[]): number[] {
+    const cached = triangleCache.get(points);
+    if (cached) return cached;
+    const triangles = computeTriangles(points);
+    triangleCache.set(points, triangles);
+    return triangles;
+}
+
+function computeTriangles(points: ControlPoint[]): number[] {
     // Delaunator takes [x0, y0, x1, y1, ...]
     if (points.length < 3) return [];
     
