@@ -23,6 +23,8 @@ dist-ssr
 *.sln
 *.sw?
 
-# Downloaded videos (scripts/download-media.sh). Kept out of git: they are large and not ours to publish.
-public/media/*
-!public/media/README.md
+# public/media/ (videos from scripts/download-media.sh) IS committed: the site serves it as the media library.
+# Only yt-dlp's leftovers stay out.
+public/media/**/*.part
+public/media/**/*.ytdl
+public/media/.build-media-library.py

@@ -6,6 +6,6 @@ LumaMap lists the videos in this folder in its video library. Layout: one sub-fo
 - `scripts/download-media.sh` downloads a YouTube playlist here and writes `library.json`.
 - After adding or removing files by hand, run `python3 scripts/build-media-library.py public/media`.
 
-Videos are not committed (see `.gitignore`): they are large, and the public site must not republish
-videos we have no right to share. If a video is your own, you can commit it together with `library.json`,
-and the GitHub Pages site will list it too (GitHub refuses files over 100 MB).
+This folder is committed: the GitHub Pages site serves it, so every video here shows up in the library
+online. GitHub refuses files over 100 MB (the script skips them) and Pages sites should stay under 1 GB.
+The repository is public: only commit videos you are allowed to share.

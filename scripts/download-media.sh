@@ -50,10 +50,12 @@ fi
 
 echo "Downloading $PLAYLIST into $OUT"
 # -S prefers H.264 up to 1080p with AAC sound: the Pi 4 decodes H.264 in hardware, and anything
-# bigger than the projector only costs CPU. Titles go to .titles.tsv for library.json.
+# bigger than the projector only costs CPU. Files over 95 MB are skipped: GitHub refuses files over
+# 100 MB. Titles go to .titles.tsv for library.json.
 "$YTDLP" \
   --yes-playlist --ignore-errors --no-overwrites --no-simulate \
   -f "bv*+ba/b" -S "res:1080,vcodec:h264,acodec:aac,ext:mp4" --merge-output-format mp4 \
+  --max-filesize 95M \
   -o "$OUT/%(playlist_index)03d-%(id)s.%(ext)s" \
   --print-to-file "%(id)s	%(playlist_index)s	%(duration)s	%(title)s" "$OUT/.titles.tsv" \
   "$PLAYLIST" || echo "Some videos could not be downloaded (see above); continuing with the rest."
@@ -68,4 +70,8 @@ python3 "$BUILDER" "$MEDIA_DIR"
 
 echo
 echo "Done. Videos are in: $OUT"
-echo "In LumaMap: select a layer -> \"From the video library\" -> \"Add videos from this computer\", pick these files."
+if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/../package.json" ] && [ -z "${3:-}" ]; then
+  echo "To publish them with the site: git add public/media && git commit -m \"Add $CATEGORY videos\" && git push"
+else
+  echo "In LumaMap: select a layer -> \"From the video library\" -> \"Add videos from this computer\", pick these files."
+fi
