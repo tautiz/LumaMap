@@ -2,6 +2,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import ControlPanel from './components/ControlPanel';
 import SurfaceCanvas from './components/SurfaceCanvas';
+import HelpDialog from './components/HelpDialog';
+import { useI18n } from './i18n';
+import { HelpCircle, Monitor, Move, Play, SlidersHorizontal } from 'lucide-react';
 import { AppMode, Layer, ControlPoint, ProjectionSource, ContentType, Transform, KeyMap, ShortcutAction } from './types';
 
 const CHANNEL_NAME = 'lumamap_sync_v2';
@@ -42,6 +45,7 @@ const DEFAULT_KEY_MAP: KeyMap = {
 };
 
 const App: React.FC = () => {
+  const { t } = useI18n();
   const isReceiver = new URLSearchParams(window.location.search).get('live') === 'true';
 
   const [mode, setMode] = useState<AppMode>(isReceiver ? AppMode.LIVE : AppMode.SETUP);
@@ -65,7 +69,7 @@ const App: React.FC = () => {
   // Initial Layer Creation
   useEffect(() => {
     if (layers.length === 0 && !isReceiver) {
-        const initialLayer = createLayer('Layer 1', projectorSize.w, projectorSize.h, {
+        const initialLayer = createLayer(t('map.layers.defaultName', { n: 1 }), projectorSize.w, projectorSize.h, {
             type: ContentType.SOLID_COLOR,
             url: '',
             name: 'Grid Pattern'
@@ -76,6 +80,26 @@ const App: React.FC = () => {
   }, []);
   
   const [uiVisible, setUiVisible] = useState(true);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [welcomeDismissed, setWelcomeDismissed] = useState(false);
+
+  // When the panel is hidden (e.g. during the show), reveal a "show controls" button on mouse move.
+  const [showRevealButton, setShowRevealButton] = useState(false);
+  useEffect(() => {
+    if (isReceiver || uiVisible) return;
+    let timer: number | undefined;
+    const onMove = () => {
+      setShowRevealButton(true);
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => setShowRevealButton(false), 2500);
+    };
+    window.addEventListener('mousemove', onMove);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.clearTimeout(timer);
+      setShowRevealButton(false);
+    };
+  }, [uiVisible, isReceiver]);
   
   const canvasDims = useRef({ w: 2363, h: 1320 });
   const channelRef = useRef<BroadcastChannel | null>(null);
@@ -86,7 +110,7 @@ const App: React.FC = () => {
 
   const addLayer = () => {
     const newLayer = createLayer(
-        `Layer ${layers.length + 1}`, 
+        t('map.layers.defaultName', { n: layers.length + 1 }),
         projectorSize.w, 
         projectorSize.h,
         {
@@ -106,7 +130,7 @@ const App: React.FC = () => {
     const newLayer: Layer = {
         ...original,
         id: Math.random().toString(36).substr(2, 9),
-        name: `${original.name} (Copy)`,
+        name: `${original.name} ${t('map.layers.copySuffix')}`,
         // CRITICAL: Generate new IDs for points so they are independent
         points: original.points.map(p => ({
             ...p,
@@ -488,17 +512,17 @@ const App: React.FC = () => {
 
     try {
       localStorage.setItem('lumaMapProject', JSON.stringify(data));
-      alert("Project saved!");
+      alert(t('alert.saved'));
     } catch (e) {
       console.error("Save failed", e);
-      alert("Failed to save project.");
+      alert(t('alert.saveFailed'));
     }
   };
 
   const handleLoad = () => {
     const json = localStorage.getItem('lumaMapProject');
     if (!json) {
-      alert("No saved project found.");
+      alert(t('alert.noSaved'));
       return;
     }
 
@@ -517,10 +541,10 @@ const App: React.FC = () => {
       if (data.keyMappings) {
         setKeyMappings(data.keyMappings);
       }
-      alert("Project loaded successfully.");
+      alert(t('alert.loaded'));
     } catch (e) {
       console.error("Load failed", e);
-      alert("Failed to load project data.");
+      alert(t('alert.loadFailed'));
     }
   };
 
@@ -548,6 +572,7 @@ const App: React.FC = () => {
           onSave={handleSave}
           onLoad={handleLoad}
           onOpenLive={handleOpenLive}
+          onOpenHelp={() => setHelpOpen(true)}
           
           showBackgroundInLive={showBackgroundInLive}
           setShowBackgroundInLive={setShowBackgroundInLive}
@@ -565,7 +590,7 @@ const App: React.FC = () => {
         />
       )}
 
-      <main className={`relative transition-all duration-300 h-full w-full bg-slate-900 ${(uiVisible && !isReceiver) ? 'ml-80' : 'ml-0'}`}>
+      <main className={`relative transition-all duration-300 h-full bg-slate-900 ${(uiVisible && !isReceiver) ? 'ml-96 w-[calc(100%-24rem)]' : 'ml-0 w-full'}`}>
         <SurfaceCanvas
           mode={mode}
           backgroundUrl={shouldShowBackground ? backgroundUrl : null}
@@ -584,26 +609,55 @@ const App: React.FC = () => {
           projectorSize={projectorSize}
         />
         
-        {!isReceiver && mode === AppMode.SETUP && !backgroundUrl && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="bg-black/80 backdrop-blur text-white p-8 rounded-xl border border-slate-700 max-w-md text-center">
-              <h2 className="text-2xl font-bold mb-4 text-cyan-400">Welcome to LumaMap</h2>
-              <div className="text-sm text-slate-400 space-y-2">
-                <p>1. Set Projector Resolution in Setup (Default 2363x1320).</p>
-                <p>2. Configure Keyboard Shortcuts in Setup.</p>
-                <p>3. Use <strong>Map</strong> mode to add and warp layers.</p>
-                <p>4. <strong>Remote Control:</strong> Use configured keys or 1-9.</p>
+        {!isReceiver && mode === AppMode.SETUP && !backgroundUrl && !welcomeDismissed && (
+          <div className="absolute inset-0 z-[150] flex items-center justify-center p-6 bg-black/40">
+            <div className="bg-slate-900/95 backdrop-blur text-white p-8 rounded-2xl border border-slate-700 shadow-2xl max-w-lg w-full">
+              <h2 className="text-3xl font-extrabold mb-3 bg-gradient-to-r from-cyan-400 to-purple-500 bg-clip-text text-transparent">{t('welcome.title')}</h2>
+              <p className="text-slate-300 mb-6 leading-relaxed">{t('welcome.intro')}</p>
+              <ol className="space-y-4 mb-8">
+                {[
+                  { icon: Monitor, color: 'bg-cyan-500', text: t('welcome.step1') },
+                  { icon: Move, color: 'bg-purple-500', text: t('welcome.step2') },
+                  { icon: Play, color: 'bg-emerald-500', text: t('welcome.step3') },
+                ].map(({ icon: Icon, color, text }, i) => (
+                  <li key={i} className="flex items-center gap-4">
+                    <span className={`shrink-0 w-12 h-12 rounded-2xl ${color} text-slate-900 flex items-center justify-center relative`}>
+                      <Icon size={24} />
+                      <span className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-white text-slate-900 text-sm font-bold flex items-center justify-center">{i + 1}</span>
+                    </span>
+                    <span className="text-base text-slate-100">{text}</span>
+                  </li>
+                ))}
+              </ol>
+              <div className="flex gap-3">
+                <button onClick={() => setWelcomeDismissed(true)} className="flex-1 py-3 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-900 font-bold text-lg transition-colors">
+                  {t('welcome.start')}
+                </button>
+                <button onClick={() => setHelpOpen(true)} className="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold flex items-center gap-2 transition-colors">
+                  <HelpCircle size={18} /> {t('common.help')}
+                </button>
               </div>
             </div>
           </div>
         )}
 
+        {!isReceiver && !uiVisible && (
+          <button
+            onClick={() => setUiVisible(true)}
+            className={`absolute top-4 left-4 z-[200] flex items-center gap-2 px-4 py-2 rounded-full bg-slate-900/90 border border-slate-600 text-white text-sm font-semibold shadow-xl transition-opacity duration-300 ${showRevealButton ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+          >
+            <SlidersHorizontal size={16} /> {t('live.showControls')}
+          </button>
+        )}
+
         {isReceiver && (
             <div className="absolute top-4 left-4 text-white/20 text-xs pointer-events-none z-[200]">
-                Receiver Mode • Waiting for Controller...
+                {t('receiver.waiting')}
             </div>
         )}
       </main>
+
+      {helpOpen && <HelpDialog keyMappings={keyMappings} onClose={() => setHelpOpen(false)} />}
     </div>
   );
 };

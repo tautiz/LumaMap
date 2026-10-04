@@ -1,12 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { AppMode, ProjectionSource, ContentType, Layer, Transform, KeyMap, ShortcutAction } from '../types';
+import { AppMode, ContentType, Layer, Transform, KeyMap, ShortcutAction } from '../types';
 import { generateTexture } from '../services/gemini';
-import { Upload, Monitor, Square, Layers, Sparkles, Move, Maximize, Image as ImageIcon, Save, FolderOpen, ExternalLink, Eye, EyeOff, Move3d, Plus, Trash2, ChevronUp, ChevronDown, Lock, Unlock, Settings, Copy, Keyboard, X } from 'lucide-react';
+import { TranslationKey, formatKey, useI18n } from '../i18n';
+import LanguageSwitcher from './LanguageSwitcher';
+import {
+  Upload, Monitor, Square, Layers, Sparkles, Move, Play, Image as ImageIcon, Save, FolderOpen, ExternalLink,
+  Eye, EyeOff, Move3d, Plus, Trash2, ChevronUp, ChevronDown, Lock, Unlock, Settings, Copy, Keyboard,
+  HelpCircle, Lightbulb, ArrowRight, Maximize, MousePointer2, ChevronRight
+} from 'lucide-react';
 
 interface ControlPanelProps {
   mode: AppMode;
   setMode: (mode: AppMode) => void;
-  
+
   // Layer Management
   layers: Layer[];
   activeLayerId: string | null;
@@ -24,6 +30,7 @@ interface ControlPanelProps {
   onSave: () => void;
   onLoad: () => void;
   onOpenLive: () => void;
+  onOpenHelp: () => void;
 
   showBackgroundInLive: boolean;
   setShowBackgroundInLive: (val: boolean) => void;
@@ -39,6 +46,38 @@ interface ControlPanelProps {
   keyMappings: KeyMap;
   setKeyMappings: (map: KeyMap) => void;
 }
+
+const STEPS: { mode: AppMode; n: number; title: TranslationKey; desc: TranslationKey; icon: React.ElementType; active: string; ring: string }[] = [
+  { mode: AppMode.SETUP, n: 1, title: 'step.setup.title', desc: 'step.setup.desc', icon: Monitor, active: 'bg-cyan-500 text-slate-900', ring: 'border-cyan-500' },
+  { mode: AppMode.MAPPING, n: 2, title: 'step.map.title', desc: 'step.map.desc', icon: Move, active: 'bg-purple-500 text-white', ring: 'border-purple-500' },
+  { mode: AppMode.LIVE, n: 3, title: 'step.live.title', desc: 'step.live.desc', icon: Play, active: 'bg-emerald-500 text-slate-900', ring: 'border-emerald-500' },
+];
+
+const SHORTCUTS: { id: ShortcutAction; label: TranslationKey }[] = [
+  { id: 'NEXT_LAYER', label: 'setup.keys.next' },
+  { id: 'PREV_LAYER', label: 'setup.keys.prev' },
+  { id: 'BLACKOUT', label: 'setup.keys.blackout' },
+  { id: 'TOGGLE_UI', label: 'setup.keys.toggleUi' },
+];
+
+const SectionTitle: React.FC<{ icon: React.ElementType; children: React.ReactNode }> = ({ icon: Icon, children }) => (
+  <h2 className="text-base font-bold text-white flex items-center gap-2">
+    <Icon size={18} className="text-slate-400" /> {children}
+  </h2>
+);
+
+const Hint: React.FC<{ color: string; children: React.ReactNode }> = ({ color, children }) => (
+  <div className={`flex gap-3 items-start rounded-xl p-3 text-sm leading-snug ${color}`}>
+    <Lightbulb size={20} className="shrink-0 mt-0.5" />
+    <p>{children}</p>
+  </div>
+);
+
+const IconButton: React.FC<{ onClick: (e: React.MouseEvent) => void; label: string; className?: string; children: React.ReactNode }> = ({ onClick, label, className = '', children }) => (
+  <button onClick={onClick} title={label} aria-label={label} className={`p-1.5 rounded-md hover:bg-slate-700 transition-colors ${className}`}>
+    {children}
+  </button>
+);
 
 const ControlPanel: React.FC<ControlPanelProps> = ({
   mode,
@@ -57,6 +96,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   onSave,
   onLoad,
   onOpenLive,
+  onOpenHelp,
   showBackgroundInLive,
   setShowBackgroundInLive,
   isEditingBackground,
@@ -68,6 +108,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   keyMappings,
   setKeyMappings
 }) => {
+  const { t } = useI18n();
   const [texturePrompt, setTexturePrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [recordingAction, setRecordingAction] = useState<ShortcutAction | null>(null);
@@ -81,7 +122,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
     const handleRecordKey = (e: KeyboardEvent) => {
         e.preventDefault();
         e.stopPropagation();
-        
+
         // Ignore modifiers on their own
         if (['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) return;
 
@@ -132,308 +173,373 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
           }
       });
     } catch (error) {
-      alert("Failed to generate texture. Check console.");
+      alert(t('map.ai.failed'));
     } finally {
       setIsGenerating(false);
     }
   };
 
-  const formatKey = (key: string) => {
-      if (key === ' ') return 'Space';
-      if (key === 'ArrowRight') return 'Right';
-      if (key === 'ArrowLeft') return 'Left';
-      if (key === 'ArrowUp') return 'Up';
-      if (key === 'ArrowDown') return 'Down';
-      return key;
+  const sourceLabel = (layer: Layer) => {
+    if (!layer.source) return t('map.selected.none');
+    if (layer.source.type === ContentType.SOLID_COLOR) return t('source.grid');
+    return layer.source.name;
   };
 
   return (
-    <div className="absolute top-0 left-0 h-full w-80 bg-slate-900/95 backdrop-blur-md border-r border-slate-700 p-6 flex flex-col gap-6 shadow-2xl z-50 overflow-y-auto transition-transform">
-      <div className="flex justify-between items-start">
-        <div>
-          <h1 className="text-2xl font-bold bg-gradient-to-r from-cyan-400 to-purple-500 bg-clip-text text-transparent mb-1">
-            LumaMap
-          </h1>
-          <p className="text-xs text-slate-400">Projection Mapping Suite</p>
+    <div className="absolute top-0 left-0 h-full w-96 bg-slate-900/95 backdrop-blur-md border-r border-slate-700 flex flex-col shadow-2xl z-50">
+      {/* HEADER */}
+      <div className="p-5 pb-4 space-y-4 border-b border-slate-800">
+        <div className="flex justify-between items-center">
+          <div>
+            <h1 className="text-2xl font-extrabold bg-gradient-to-r from-cyan-400 to-purple-500 bg-clip-text text-transparent">
+              LumaMap
+            </h1>
+            <p className="text-sm text-slate-400">{t('app.tagline')}</p>
+          </div>
+          <LanguageSwitcher />
         </div>
-        <div className="flex gap-1">
-          <button onClick={onSave} className="p-2 text-slate-400 hover:text-cyan-400 hover:bg-slate-800 rounded transition-colors" title="Save Project">
-            <Save size={16} />
+
+        <div className="grid grid-cols-3 gap-2">
+          <button onClick={onOpenHelp} className="flex items-center justify-center gap-1.5 py-2 rounded-lg bg-yellow-400 text-slate-900 font-semibold text-sm hover:bg-yellow-300 transition-colors">
+            <HelpCircle size={16} /> {t('common.help')}
           </button>
-          <button onClick={onLoad} className="p-2 text-slate-400 hover:text-cyan-400 hover:bg-slate-800 rounded transition-colors" title="Load Project">
-            <FolderOpen size={16} />
+          <button onClick={onSave} className="flex items-center justify-center gap-1.5 py-2 rounded-lg bg-slate-800 text-slate-200 text-sm hover:bg-slate-700 transition-colors">
+            <Save size={16} /> {t('common.save')}
+          </button>
+          <button onClick={onLoad} className="flex items-center justify-center gap-1.5 py-2 rounded-lg bg-slate-800 text-slate-200 text-sm hover:bg-slate-700 transition-colors">
+            <FolderOpen size={16} /> {t('common.load')}
           </button>
         </div>
+
+        {/* STEPS */}
+        <nav className="grid grid-cols-3 gap-2">
+          {STEPS.map(step => {
+            const isActive = mode === step.mode;
+            const Icon = step.icon;
+            return (
+              <button
+                key={step.mode}
+                onClick={() => setMode(step.mode)}
+                aria-current={isActive ? 'step' : undefined}
+                className={`flex flex-col items-center gap-1 rounded-xl py-2.5 px-1 border-2 transition-all ${
+                  isActive ? `${step.ring} bg-slate-800 shadow-lg` : 'border-slate-800 hover:border-slate-600 hover:bg-slate-800/60'
+                }`}
+              >
+                <span className={`w-8 h-8 rounded-full flex items-center justify-center font-bold ${isActive ? step.active : 'bg-slate-700 text-slate-300'}`}>
+                  {isActive ? <Icon size={16} /> : step.n}
+                </span>
+                <span className={`text-sm font-bold ${isActive ? 'text-white' : 'text-slate-300'}`}>{t(step.title)}</span>
+                <span className="text-[11px] leading-tight text-slate-400 text-center">{t(step.desc)}</span>
+              </button>
+            );
+          })}
+        </nav>
       </div>
 
-      <div className="flex bg-slate-800 p-1 rounded-lg">
-        <button
-          onClick={() => setMode(AppMode.SETUP)}
-          className={`flex-1 flex items-center justify-center gap-2 py-2 text-sm rounded-md transition-colors ${mode === AppMode.SETUP ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}
-        >
-          <Monitor size={14} /> Setup
-        </button>
-        <button
-          onClick={() => setMode(AppMode.MAPPING)}
-          className={`flex-1 flex items-center justify-center gap-2 py-2 text-sm rounded-md transition-colors ${mode === AppMode.MAPPING ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}
-        >
-          <Move size={14} /> Map
-        </button>
-        <button
-          onClick={() => setMode(AppMode.LIVE)}
-          className={`flex-1 flex items-center justify-center gap-2 py-2 text-sm rounded-md transition-colors ${mode === AppMode.LIVE ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}
-        >
-          <Maximize size={14} /> Live
-        </button>
-      </div>
-
-      <button 
-        onClick={onOpenLive}
-        className="w-full py-2 border border-slate-600 rounded text-slate-300 hover:bg-slate-800 flex items-center justify-center gap-2 text-sm"
-      >
-        <ExternalLink size={14} /> Open Projector Window
-      </button>
-
+      <div className="flex-1 overflow-y-auto p-5 space-y-5">
+      {/* STEP 1: SETUP */}
       {mode === AppMode.SETUP && (
-        <div className="space-y-4 border-t border-slate-800 pt-4">
-          
-          {/* RESOLUTION */}
-          <div className="space-y-2">
-            <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-                <Settings size={16} /> Projector Settings
-            </h2>
-            <div className="grid grid-cols-2 gap-2">
-                <div>
-                    <label className="text-[10px] text-slate-500">Resolution W</label>
-                    <input 
-                        type="number" 
-                        value={projectorSize.w} 
-                        onChange={(e) => setProjectorSize({ ...projectorSize, w: parseInt(e.target.value) || 1920 })}
-                        className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white"
-                    />
-                </div>
-                <div>
-                    <label className="text-[10px] text-slate-500">Resolution H</label>
-                    <input 
-                        type="number" 
-                        value={projectorSize.h} 
-                        onChange={(e) => setProjectorSize({ ...projectorSize, h: parseInt(e.target.value) || 1080 })}
-                        className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white"
-                    />
-                </div>
-            </div>
-          </div>
+        <>
+          <Hint color="bg-cyan-500/15 text-cyan-100">{t('setup.hint')}</Hint>
 
-          {/* KEYBOARD SHORTCUTS */}
-          <div className="space-y-2">
-              <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2 mt-4">
-                  <Keyboard size={16} /> Keyboard Controls
-              </h2>
-              <p className="text-[10px] text-slate-500 mb-2">Click button to reassign key.</p>
-              
-              <div className="space-y-2">
-                  {[
-                      { id: 'NEXT_LAYER', label: 'Next Layer (Solo)' },
-                      { id: 'PREV_LAYER', label: 'Prev Layer (Solo)' },
-                      { id: 'BLACKOUT', label: 'Blackout / Restore' },
-                      { id: 'TOGGLE_UI', label: 'Toggle Setup UI' },
-                  ].map((action) => (
-                      <div key={action.id} className="flex justify-between items-center text-xs">
-                          <span className="text-slate-400">{action.label}</span>
-                          <button 
-                            onClick={() => setRecordingAction(action.id as ShortcutAction)}
-                            className={`min-w-[60px] px-2 py-1 rounded text-center font-mono uppercase border ${recordingAction === action.id ? 'bg-cyan-900 border-cyan-500 text-white animate-pulse' : 'bg-slate-800 border-slate-700 text-cyan-400 hover:border-cyan-600'}`}
-                          >
-                              {recordingAction === action.id ? 'Press Key...' : formatKey(keyMappings[action.id as ShortcutAction])}
-                          </button>
-                      </div>
-                  ))}
-              </div>
-          </div>
+          <section className="space-y-3">
+            <SectionTitle icon={ImageIcon}>{t('setup.photo.title')}</SectionTitle>
+            <label className={`relative border-2 border-dashed rounded-xl flex flex-col items-center justify-center text-center cursor-pointer transition-colors overflow-hidden ${
+              backgroundUrl ? 'border-slate-700 hover:border-cyan-500 h-28' : 'border-cyan-600/60 hover:border-cyan-400 hover:bg-cyan-500/5 p-6'
+            }`}>
+              <input type="file" accept="image/*" className="sr-only" onChange={(e) => handleFileUpload(e, 'BACKGROUND')} />
+              {backgroundUrl ? (
+                <>
+                  <img src={backgroundUrl} alt="" className="absolute inset-0 w-full h-full object-cover opacity-40" />
+                  <span className="relative flex items-center gap-2 bg-slate-900/80 rounded-full px-3 py-1.5 text-sm text-white">
+                    <Upload size={16} /> {t('setup.photo.change')}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Upload className="text-cyan-400 mb-2" size={32} />
+                  <span className="text-base font-semibold text-white">{t('setup.photo.upload')}</span>
+                  <span className="text-xs text-slate-400 mt-1">{t('setup.photo.optional')}</span>
+                </>
+              )}
+            </label>
 
-          {/* REFERENCE PHOTO */}
-          <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2 mt-4">
-            <Monitor size={16} /> Reference Surface
-          </h2>
-          
-          <div className="border-2 border-dashed border-slate-700 rounded-lg p-6 flex flex-col items-center justify-center text-center hover:border-cyan-500 hover:bg-slate-800/50 transition-colors cursor-pointer relative">
-            <input 
-              type="file" 
-              accept="image/*" 
-              className="absolute inset-0 opacity-0 cursor-pointer"
-              onChange={(e) => handleFileUpload(e, 'BACKGROUND')}
-            />
-            <Upload className="text-slate-500 mb-2" size={24} />
-            <span className="text-sm text-slate-400">Upload Photo</span>
-          </div>
-
-          {backgroundUrl && (
-             <div className="space-y-3 bg-slate-800/50 p-3 rounded-lg border border-slate-700">
-                <div className="flex justify-between items-center text-xs text-slate-400">
-                    <span>Position X</span>
-                    <input 
-                        type="number" className="w-16 bg-slate-900 border border-slate-700 rounded px-1"
-                        value={Math.round(backgroundTransform.x)}
-                        onChange={e => setBackgroundTransform({...backgroundTransform, x: Number(e.target.value)})}
-                    />
-                </div>
-                <div className="flex justify-between items-center text-xs text-slate-400">
-                    <span>Position Y</span>
-                    <input 
-                        type="number" className="w-16 bg-slate-900 border border-slate-700 rounded px-1"
-                        value={Math.round(backgroundTransform.y)}
-                        onChange={e => setBackgroundTransform({...backgroundTransform, y: Number(e.target.value)})}
-                    />
-                </div>
-                <div className="flex justify-between items-center text-xs text-slate-400">
-                    <span>Scale</span>
-                    <div className="flex items-center gap-2">
-                         <input 
-                            type="range" min="0.1" max="5" step="0.01" 
-                            className="w-20"
-                            value={backgroundTransform.k}
-                            onChange={e => setBackgroundTransform({...backgroundTransform, k: Number(e.target.value)})}
-                        />
-                        <span className="w-8 text-right">{backgroundTransform.k.toFixed(2)}</span>
-                    </div>
-                </div>
-
-                <div className="h-px bg-slate-700 my-2"></div>
-
+            {backgroundUrl && (
+              <div className="grid grid-cols-2 gap-2">
                 <button
-                    onClick={() => setIsEditingBackground(!isEditingBackground)}
-                    className={`w-full py-2 rounded text-xs font-medium flex items-center justify-center gap-2 transition-colors ${
-                        isEditingBackground ? 'bg-cyan-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-                    }`}
+                  onClick={() => setIsEditingBackground(!isEditingBackground)}
+                  className={`py-2.5 px-2 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors ${
+                    isEditingBackground ? 'bg-yellow-500 text-slate-900' : 'bg-slate-800 text-slate-200 hover:bg-slate-700'
+                  }`}
                 >
-                    <Move3d size={14} />
-                    {isEditingBackground ? 'Stop Visual Adjust' : 'Visually Adjust'}
+                  <Move3d size={16} />
+                  {isEditingBackground ? t('setup.photo.moveStop') : t('setup.photo.move')}
                 </button>
-             </div>
-          )}
+                <button
+                  onClick={() => setShowBackgroundInLive(!showBackgroundInLive)}
+                  aria-pressed={showBackgroundInLive}
+                  className={`py-2.5 px-2 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors ${
+                    showBackgroundInLive ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-200 hover:bg-slate-700'
+                  }`}
+                >
+                  {showBackgroundInLive ? <Eye size={16} /> : <EyeOff size={16} />}
+                  {t('setup.photo.showInLive')}
+                </button>
+              </div>
+            )}
+          </section>
 
-          {backgroundUrl && (
-             <div className="flex gap-2">
-                 <button
-                    onClick={() => setShowBackgroundInLive(!showBackgroundInLive)}
-                    className={`flex-1 py-2 rounded text-xs font-medium flex items-center justify-center gap-2 transition-colors ${
-                        showBackgroundInLive ? 'bg-green-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-                    }`}
-                >
-                    {showBackgroundInLive ? <Eye size={14} /> : <EyeOff size={14} />}
-                    {showBackgroundInLive ? 'Live: Visible' : 'Live: Hidden'}
-                </button>
-                 <button onClick={toggleFullscreen} className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 rounded text-sm text-cyan-400 font-medium">
-                    Fullscreen
-                 </button>
-             </div>
-          )}
-        </div>
+          <section className="space-y-3">
+            <SectionTitle icon={Monitor}>{t('setup.projector.title')}</SectionTitle>
+            <button
+              onClick={onOpenLive}
+              className="w-full py-3 rounded-xl bg-slate-800 border border-slate-600 text-white font-semibold hover:bg-slate-700 hover:border-cyan-500 flex items-center justify-center gap-2 transition-colors"
+            >
+              <ExternalLink size={18} /> {t('setup.projector.open')}
+            </button>
+            <p className="text-xs text-slate-400">{t('setup.projector.openHint')}</p>
+            <button onClick={toggleFullscreen} className="w-full py-2 rounded-lg bg-slate-800 text-slate-300 text-sm hover:bg-slate-700 flex items-center justify-center gap-2">
+              <Maximize size={16} /> {t('setup.fullscreen')}
+            </button>
+          </section>
+
+          <details className="group rounded-xl border border-slate-800 bg-slate-800/30">
+            <summary className="cursor-pointer select-none list-none flex items-center gap-2 px-4 py-3 text-sm font-semibold text-slate-300 hover:text-white">
+              <ChevronRight size={16} className="transition-transform group-open:rotate-90" />
+              <Settings size={16} /> {t('common.more')}
+            </summary>
+            <div className="px-4 pb-4 space-y-5">
+              <div className="grid grid-cols-2 gap-2">
+                <label className="text-xs text-slate-400 space-y-1">
+                  <span>{t('setup.projector.width')}</span>
+                  <input
+                    type="number"
+                    value={projectorSize.w}
+                    onChange={(e) => setProjectorSize({ ...projectorSize, w: parseInt(e.target.value) || 1920 })}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-sm text-white"
+                  />
+                </label>
+                <label className="text-xs text-slate-400 space-y-1">
+                  <span>{t('setup.projector.height')}</span>
+                  <input
+                    type="number"
+                    value={projectorSize.h}
+                    onChange={(e) => setProjectorSize({ ...projectorSize, h: parseInt(e.target.value) || 1080 })}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-sm text-white"
+                  />
+                </label>
+              </div>
+
+              {backgroundUrl && (
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center text-xs text-slate-400">
+                    <span>{t('setup.photo.posX')}</span>
+                    <input
+                      type="number" className="w-20 bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-white"
+                      value={Math.round(backgroundTransform.x)}
+                      onChange={e => setBackgroundTransform({...backgroundTransform, x: Number(e.target.value)})}
+                    />
+                  </div>
+                  <div className="flex justify-between items-center text-xs text-slate-400">
+                    <span>{t('setup.photo.posY')}</span>
+                    <input
+                      type="number" className="w-20 bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-white"
+                      value={Math.round(backgroundTransform.y)}
+                      onChange={e => setBackgroundTransform({...backgroundTransform, y: Number(e.target.value)})}
+                    />
+                  </div>
+                  <div className="flex justify-between items-center text-xs text-slate-400">
+                    <span>{t('setup.photo.size')}</span>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range" min="0.1" max="5" step="0.01"
+                        className="w-24 accent-cyan-500"
+                        value={backgroundTransform.k}
+                        onChange={e => setBackgroundTransform({...backgroundTransform, k: Number(e.target.value)})}
+                      />
+                      <span className="w-8 text-right">{backgroundTransform.k.toFixed(2)}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2"><Keyboard size={16} /> {t('setup.keys.title')}</h3>
+                <p className="text-xs text-slate-500">{t('setup.keys.hint')}</p>
+                {SHORTCUTS.map((action) => (
+                  <div key={action.id} className="flex justify-between items-center text-sm gap-2">
+                    <span className="text-slate-300">{t(action.label)}</span>
+                    <button
+                      onClick={() => setRecordingAction(action.id)}
+                      className={`min-w-[72px] px-2 py-1 rounded-md text-center font-mono border ${recordingAction === action.id ? 'bg-cyan-900 border-cyan-500 text-white animate-pulse' : 'bg-slate-800 border-slate-600 text-cyan-300 hover:border-cyan-500'}`}
+                    >
+                      {recordingAction === action.id ? t('setup.keys.press') : formatKey(keyMappings[action.id], t)}
+                    </button>
+                  </div>
+                ))}
+                <p className="text-xs text-slate-500">{t('setup.keys.numbers')}</p>
+              </div>
+            </div>
+          </details>
+
+          <button onClick={() => setMode(AppMode.MAPPING)} className="w-full py-3 rounded-xl bg-purple-500 hover:bg-purple-400 text-white font-bold flex items-center justify-center gap-2 transition-colors">
+            {t('setup.next')} <ArrowRight size={18} />
+          </button>
+        </>
       )}
 
+      {/* STEP 2: MAPPING */}
       {mode === AppMode.MAPPING && (
-        <div className="space-y-4 border-t border-slate-800 pt-4">
-          <div className="flex justify-between items-center">
-             <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-                <Layers size={16} /> Scene Layers
-             </h2>
-             <button onClick={onAddLayer} className="p-1 text-cyan-400 hover:bg-slate-800 rounded">
-                 <Plus size={16} />
-             </button>
-          </div>
+        <>
+          <Hint color="bg-purple-500/15 text-purple-100">{t('map.hint')}</Hint>
 
-          <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
-             {layers.slice().reverse().map((layer) => (
-                 <div 
+          <section className="space-y-2">
+            <div className="flex justify-between items-center">
+              <SectionTitle icon={Layers}>{t('map.layers.title')}</SectionTitle>
+              <button onClick={onAddLayer} className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-purple-500 hover:bg-purple-400 text-white text-sm font-semibold transition-colors">
+                <Plus size={16} /> {t('map.layers.add')}
+              </button>
+            </div>
+
+            {layers.length === 0 && <p className="text-sm text-slate-400">{t('map.layers.empty')}</p>}
+
+            <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+              {layers.slice().reverse().map((layer) => {
+                const isActive = activeLayerId === layer.id;
+                return (
+                  <div
                     key={layer.id}
                     onClick={() => onSelectLayer(layer.id)}
-                    className={`flex items-center gap-2 p-2 rounded text-xs cursor-pointer border ${activeLayerId === layer.id ? 'border-cyan-500 bg-cyan-900/20' : 'border-transparent hover:bg-slate-800'}`}
-                 >
-                     <button 
-                        onClick={(e) => { e.stopPropagation(); onUpdateLayer(layer.id, { visible: !layer.visible }); }}
-                        className={layer.visible ? 'text-slate-300' : 'text-slate-600'}
-                     >
-                         {layer.visible ? <Eye size={14} /> : <EyeOff size={14} />}
-                     </button>
-                     <span className="flex-1 truncate font-medium text-slate-200">{layer.name}</span>
-                     
-                     <div className="flex gap-1 opacity-50 hover:opacity-100">
-                        <button onClick={(e) => { e.stopPropagation(); onMoveLayer(layer.id, 'up'); }}><ChevronUp size={12} /></button>
-                        <button onClick={(e) => { e.stopPropagation(); onMoveLayer(layer.id, 'down'); }}><ChevronDown size={12} /></button>
-                        <button onClick={(e) => { e.stopPropagation(); onDuplicateLayer(layer.id); }} className="hover:text-cyan-400" title="Clone Layer"><Copy size={12} /></button>
-                        <button onClick={(e) => { e.stopPropagation(); onRemoveLayer(layer.id); }} className="hover:text-red-400"><Trash2 size={12} /></button>
-                     </div>
-                 </div>
-             ))}
-          </div>
+                    className={`flex items-center gap-2 p-2 rounded-lg text-sm cursor-pointer border-2 transition-colors ${isActive ? 'border-purple-500 bg-purple-500/10' : 'border-slate-800 bg-slate-800/40 hover:border-slate-600'}`}
+                  >
+                    <IconButton
+                      onClick={(e) => { e.stopPropagation(); onUpdateLayer(layer.id, { visible: !layer.visible }); }}
+                      label={layer.visible ? t('map.layers.hide') : t('map.layers.show')}
+                      className={layer.visible ? 'text-white' : 'text-slate-600'}
+                    >
+                      {layer.visible ? <Eye size={18} /> : <EyeOff size={18} />}
+                    </IconButton>
+                    <span className={`flex-1 truncate font-medium ${layer.visible ? 'text-slate-100' : 'text-slate-500'}`}>{layer.name}</span>
+                    {layer.locked && <Lock size={14} className="text-yellow-400" />}
+                    <div className={`flex ${isActive ? 'opacity-100' : 'opacity-60'} text-slate-300`}>
+                      <IconButton onClick={(e) => { e.stopPropagation(); onMoveLayer(layer.id, 'up'); }} label={t('map.layers.up')}><ChevronUp size={16} /></IconButton>
+                      <IconButton onClick={(e) => { e.stopPropagation(); onMoveLayer(layer.id, 'down'); }} label={t('map.layers.down')}><ChevronDown size={16} /></IconButton>
+                      <IconButton onClick={(e) => { e.stopPropagation(); onDuplicateLayer(layer.id); }} label={t('map.layers.copy')} className="hover:text-cyan-400"><Copy size={16} /></IconButton>
+                      <IconButton onClick={(e) => { e.stopPropagation(); onRemoveLayer(layer.id); }} label={t('map.layers.delete')} className="hover:text-red-400"><Trash2 size={16} /></IconButton>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
 
           {activeLayer && (
-            <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700 space-y-3">
-               <div className="flex justify-between items-center">
-                  <span className="text-xs font-bold text-cyan-400">Selected Layer Properties</span>
-                  <button onClick={() => onUpdateLayer(activeLayer.id, { locked: !activeLayer.locked })} className="text-slate-400 hover:text-white">
-                      {activeLayer.locked ? <Lock size={14} /> : <Unlock size={14} />}
-                  </button>
-               </div>
-               
-               <input 
-                  type="text" 
-                  value={activeLayer.name} 
+            <section className="bg-slate-800/40 p-4 rounded-xl border border-slate-700 space-y-4">
+              <h3 className="text-base font-bold text-white">{t('map.selected.title')}</h3>
+
+              <div className="grid grid-cols-2 gap-2">
+                <label className="relative border-2 border-slate-700 bg-slate-900 rounded-xl p-3 flex flex-col items-center gap-1.5 text-center hover:border-purple-500 cursor-pointer transition-colors">
+                  <input type="file" accept="image/*,video/*" className="sr-only" onChange={(e) => handleFileUpload(e, 'CONTENT')} />
+                  <ImageIcon size={24} className="text-purple-400" />
+                  <span className="text-xs font-medium text-slate-200">{t('map.selected.upload')}</span>
+                </label>
+                <button
+                  onClick={() => onUpdateLayer(activeLayer.id, { source: { type: ContentType.SOLID_COLOR, url: '', name: 'Grid Pattern' } })}
+                  className="border-2 border-slate-700 bg-slate-900 rounded-xl p-3 flex flex-col items-center gap-1.5 hover:border-emerald-500 transition-colors"
+                >
+                  <Square size={24} className="text-emerald-400" />
+                  <span className="text-xs font-medium text-slate-200">{t('map.selected.grid')}</span>
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-400 truncate">{t('map.selected.current', { name: sourceLabel(activeLayer) })}</p>
+
+              <label className="block space-y-1">
+                <span className="text-xs text-slate-400">{t('map.selected.name')}</span>
+                <input
+                  type="text"
+                  value={activeLayer.name}
                   onChange={(e) => onUpdateLayer(activeLayer.id, { name: e.target.value })}
-                  className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-300 mb-2"
-               />
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white"
+                />
+              </label>
 
-               <div>
-                    <label className="text-[10px] text-slate-400 block mb-1">Opacity</label>
-                    <input 
-                    type="range" min="0" max="1" step="0.05" 
-                    value={activeLayer.opacity} 
-                    onChange={(e) => onUpdateLayer(activeLayer.id, { opacity: parseFloat(e.target.value) })}
-                    className="w-full h-1 bg-slate-700 rounded appearance-none"
-                    />
-               </div>
+              <label className="block space-y-1">
+                <span className="flex justify-between text-xs text-slate-400">
+                  <span>{t('map.selected.opacity')}</span>
+                  <span>{Math.round(activeLayer.opacity * 100)}%</span>
+                </span>
+                <input
+                  type="range" min="0" max="1" step="0.05"
+                  value={activeLayer.opacity}
+                  onChange={(e) => onUpdateLayer(activeLayer.id, { opacity: parseFloat(e.target.value) })}
+                  className="w-full accent-purple-500"
+                />
+              </label>
 
-                <div className="grid grid-cols-2 gap-2 pt-2">
-                    <div className="relative border border-slate-700 bg-slate-900 rounded p-2 flex flex-col items-center hover:bg-slate-700 cursor-pointer">
-                        <input type="file" accept="image/*,video/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => handleFileUpload(e, 'CONTENT')} />
-                        <ImageIcon size={16} className="mb-1 text-purple-400" />
-                        <span className="text-[10px]">Upload Media</span>
-                    </div>
-                    <button 
-                        onClick={() => onUpdateLayer(activeLayer.id, { source: { type: ContentType.SOLID_COLOR, url: '', name: 'Grid Pattern' } })}
-                        className="border border-slate-700 bg-slate-900 rounded p-2 flex flex-col items-center hover:bg-slate-700"
-                    >
-                        <Square size={16} className="mb-1 text-green-400" />
-                        <span className="text-[10px]">Reset to Grid</span>
-                    </button>
+              <button
+                onClick={() => onUpdateLayer(activeLayer.id, { locked: !activeLayer.locked })}
+                aria-pressed={activeLayer.locked}
+                className={`w-full py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-colors ${
+                  activeLayer.locked ? 'bg-yellow-500 text-slate-900' : 'bg-slate-900 border border-slate-700 text-slate-200 hover:bg-slate-700'
+                }`}
+              >
+                {activeLayer.locked ? <><Unlock size={16} /> {t('map.selected.unlock')}</> : <><Lock size={16} /> {t('map.selected.lock')}</>}
+              </button>
+
+              <details className="group rounded-lg border border-slate-700">
+                <summary className="cursor-pointer select-none list-none flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:text-white">
+                  <ChevronRight size={14} className="transition-transform group-open:rotate-90" />
+                  <Sparkles size={14} className="text-yellow-400" /> {t('map.ai.title')}
+                </summary>
+                <div className="px-3 pb-3 space-y-2">
+                  <input
+                    type="text"
+                    value={texturePrompt}
+                    onChange={(e) => setTexturePrompt(e.target.value)}
+                    placeholder={t('map.ai.placeholder')}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-yellow-500"
+                  />
+                  <button
+                    onClick={handleGenerateTexture}
+                    disabled={isGenerating || !texturePrompt}
+                    className="w-full py-2 bg-gradient-to-r from-yellow-500 to-orange-500 text-slate-900 rounded-lg text-sm font-semibold hover:brightness-110 disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    <Sparkles size={14} /> {isGenerating ? t('map.ai.generating') : t('map.ai.generate')}
+                  </button>
                 </div>
-
-                <div className="pt-2 border-t border-slate-700">
-                    <div className="flex gap-2 mb-2">
-                        <input 
-                        type="text" 
-                        value={texturePrompt}
-                        onChange={(e) => setTexturePrompt(e.target.value)}
-                        placeholder="AI Texture Prompt..."
-                        className="flex-1 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs focus:outline-none"
-                        />
-                    </div>
-                    <button 
-                        onClick={handleGenerateTexture}
-                        disabled={isGenerating || !texturePrompt}
-                        className="w-full py-1.5 bg-gradient-to-r from-yellow-600 to-orange-600 rounded text-xs font-medium hover:brightness-110 disabled:opacity-50 flex items-center justify-center gap-2"
-                    >
-                        {isGenerating ? 'Generating...' : 'Generate AI Texture'}
-                    </button>
-                </div>
-
-                <div className="text-[10px] text-slate-500 pt-1">
-                   {activeLayer.source ? `Source: ${activeLayer.source.name}` : 'No source selected'}
-                </div>
-            </div>
+              </details>
+            </section>
           )}
-        </div>
+
+          <ul className="space-y-1.5 text-xs text-slate-400">
+            {(['map.tip.drag', 'map.tip.move', 'map.tip.add', 'map.tip.remove', 'map.tip.zoom'] as TranslationKey[]).map(k => (
+              <li key={k} className="flex items-center gap-2"><MousePointer2 size={12} className="shrink-0 text-purple-400" /> {t(k)}</li>
+            ))}
+          </ul>
+
+          <button onClick={() => setMode(AppMode.LIVE)} className="w-full py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-900 font-bold flex items-center justify-center gap-2 transition-colors">
+            {t('map.next')} <Play size={18} />
+          </button>
+        </>
       )}
+
+      {/* STEP 3: LIVE (panel only shows if the user brings controls back) */}
+      {mode === AppMode.LIVE && (
+        <>
+          <Hint color="bg-emerald-500/15 text-emerald-100">{t('live.hint')}</Hint>
+          <p className="text-sm text-slate-400">{t('live.keysHint', {
+            prev: formatKey(keyMappings.PREV_LAYER, t),
+            next: formatKey(keyMappings.NEXT_LAYER, t),
+            blackout: formatKey(keyMappings.BLACKOUT, t),
+            ui: formatKey(keyMappings.TOGGLE_UI, t),
+          })}</p>
+          <button onClick={onOpenLive} className="w-full py-3 rounded-xl bg-slate-800 border border-slate-600 text-white font-semibold hover:bg-slate-700 flex items-center justify-center gap-2">
+            <ExternalLink size={18} /> {t('setup.projector.open')}
+          </button>
+        </>
+      )}
+      </div>
     </div>
   );
 };
