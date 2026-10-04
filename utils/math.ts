@@ -1,6 +1,5 @@
+import Delaunator from 'delaunator';
 import { ControlPoint } from '../types';
-
-declare const Delaunator: any;
 
 /**
  * Calculates the cross product of two vectors (p1-p0) and (p2-p0)
@@ -99,7 +98,6 @@ export function triangulate(points: ControlPoint[]): number[] {
         coords[i * 2 + 1] = points[i].y;
     }
 
-    // @ts-ignore - Delaunator is global from CDN
     const delaunay = new Delaunator(coords);
     return Array.from(delaunay.triangles);
 }
