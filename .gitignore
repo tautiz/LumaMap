@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# public/media/ (videos from scripts/download-media.sh) IS committed: the site serves it as the media library.
+# Only yt-dlp's leftovers stay out.
+public/media/**/*.part
+public/media/**/*.ytdl
+public/media/.build-media-library.py

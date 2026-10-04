@@ -6,6 +6,7 @@ import HelpDialog from './components/HelpDialog';
 import { useI18n } from './i18n';
 import { HelpCircle, Monitor, Move, Play, SlidersHorizontal } from 'lucide-react';
 import { AppMode, Layer, ControlPoint, ProjectionSource, ContentType, Transform, KeyMap, ShortcutAction } from './types';
+import { playlistStep } from './services/mediaLibrary';
 import { SavedProject, saveToBrowser, loadFromBrowser, exportShowFile, parseShowFile, fetchShowFile } from './services/projectStore';
 
 const CHANNEL_NAME = 'lumamap_sync_v2';
@@ -374,6 +375,19 @@ const App: React.FC = () => {
       if (any) channelRef.current?.postMessage({ type: 'VIDEO_TIME', payload: { times, sentAt: Date.now() } });
     }, 1000);
     return () => window.clearInterval(timer);
+  }, [isReceiver]);
+
+  // A playlist video ended: go on to the next one. A connected projector window waits for the control
+  // window's choice instead, so both windows stay on the same video.
+  const receiverConnectedRef = useRef(receiverConnected);
+  receiverConnectedRef.current = receiverConnected;
+  const handleVideoEnded = useCallback((layerId: string) => {
+    if (isReceiver && receiverConnectedRef.current) return;
+    setLayers(prev => prev.map(l => {
+      if (l.id !== layerId) return l;
+      const updates = playlistStep(l, 1, true);
+      return updates ? { ...l, ...updates } : l;
+    }));
   }, [isReceiver]);
 
   // Projector window opened without a control window (e.g. after a restart): show the show saved in
@@ -838,6 +852,7 @@ const App: React.FC = () => {
 
           projectorSize={projectorSize}
           videoRegistry={videoRegistry}
+          onVideoEnded={handleVideoEnded}
         />
         
         {!isReceiver && mode === AppMode.SETUP && !backgroundUrl && !welcomeDismissed && (

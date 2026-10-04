@@ -25,6 +25,13 @@ export interface ProjectionSource {
   file?: File; // Raw file object for syncing across tabs
 }
 
+// Several videos played one after another on the same layer. The layer's `source` is always items[index].
+export interface Playlist {
+  items: ProjectionSource[];
+  index: number;
+  loop: boolean; // After the last video start again from the first; otherwise stop on the last one
+}
+
 export interface Transform {
   x: number;
   y: number;
@@ -48,6 +55,7 @@ export interface Layer {
   opacity: number; // User defined master opacity
   transitionOpacity?: number; // System defined fade multiplier (0-1)
   source: ProjectionSource | null;
+  playlist?: Playlist | null;
   points: ControlPoint[];
   playback: PlaybackState;
 }

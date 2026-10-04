@@ -14,6 +14,14 @@ Open `?show` to start the saved show full screen with no controls, or `?show=<fi
 from a URL. To make a projector start the show at power-on, see
 [docs/automatinis-pasirodymas.md](docs/automatinis-pasirodymas.md) (Lithuanian) and `scripts/raspberry-pi-kiosk.sh`.
 
+## Video library and playlists
+
+Each layer can take videos from a library ("From the video library"), grouped by category (Halloween first).
+Pick one video to loop it, or several to play them one after another and start again. Videos come from this
+browser (added once from the computer, kept offline) or from `media/library.json` next to the app.
+`scripts/download-media.sh` downloads a YouTube playlist into such a folder. After the first visit the app
+also opens without internet. Guide (Lithuanian): [docs/video-biblioteka.md](docs/video-biblioteka.md).
+
 ## Run Locally
 
 **Prerequisites:**  Node.js

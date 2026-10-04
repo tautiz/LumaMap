@@ -4,6 +4,7 @@ import { ControlPoint, ContentType, AppMode, Transform, Layer } from '../types';
 import { triangulate, solveAffine, getBarycentric, pointInTriangle } from '../utils/math';
 import Draggable from 'react-draggable';
 import { useI18n } from '../i18n';
+import { videoLoops } from '../services/mediaLibrary';
 import { ZoomIn, ZoomOut, RefreshCw, Play, Pause, Volume2, VolumeX } from 'lucide-react';
 
 interface SurfaceCanvasProps {
@@ -28,6 +29,9 @@ interface SurfaceCanvasProps {
 
   // Optional shared map of layer id -> video element, so the app can read and correct playback positions.
   videoRegistry?: Map<string, HTMLVideoElement>;
+
+  // Called when a layer's video reaches its end (only videos that do not loop by themselves, see videoLoops).
+  onVideoEnded?: (layerId: string) => void;
 }
 
 const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
@@ -42,7 +46,8 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
   onBackgroundTransformChange,
   isEditingBackground = false,
   projectorSize,
-  videoRegistry
+  videoRegistry,
+  onVideoEnded
 }) => {
   const { t } = useI18n();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -101,6 +106,10 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
 
   // --- Resource Management & Video Sync ---
 
+  // Video element events outlive the render that created them, so they read the latest props from here.
+  const latestRef = useRef({ layers, onUpdateLayer, onVideoEnded });
+  latestRef.current = { layers, onUpdateLayer, onVideoEnded };
+
   useEffect(() => {
     layers.forEach(layer => {
         if (layer.source?.type === ContentType.IMAGE && layer.source.url) {
@@ -116,17 +125,23 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
             if (!video) {
                 video = document.createElement('video');
                 video.crossOrigin = "anonymous";
-                video.loop = true;
                 video.playsInline = true;
                 video.preload = "auto";
                 videoCache.set(layer.id, video);
                 
-                video.onloadedmetadata = () => {
-                   if (Math.abs(video!.duration - layer.playback.duration) > 0.5) {
-                       onUpdateLayer(layer.id, { playback: { ...layer.playback, duration: video!.duration } });
+                const v = video;
+                const layerId = layer.id;
+                v.onloadedmetadata = () => {
+                   const current = latestRef.current.layers.find(l => l.id === layerId);
+                   if (current && Math.abs(v.duration - current.playback.duration) > 0.5) {
+                       latestRef.current.onUpdateLayer(layerId, { playback: { ...current.playback, duration: v.duration } });
                    }
                 };
+                v.onended = () => latestRef.current.onVideoEnded?.(layerId);
             }
+
+            const loop = videoLoops(layer);
+            if (video.loop !== loop) video.loop = loop;
             
             if (video.src !== layer.source.url) {
                 video.src = layer.source.url;

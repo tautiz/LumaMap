@@ -1,4 +1,4 @@
-import { KeyMap, Layer, Transform } from '../types';
+import { KeyMap, Layer, ProjectionSource, Transform } from '../types';
 
 // A project with its media files kept as Blobs, so nothing has to be uploaded again after opening.
 export interface SavedProject {
@@ -12,28 +12,36 @@ export interface SavedProject {
 
 const DB_NAME = 'lumamap';
 const STORE = 'projects';
+export const LIBRARY_STORE = 'library';
 const CURRENT_KEY = 'current';
 const LEGACY_KEY = 'lumaMapProject';
 
 // --- Browser storage (IndexedDB holds Blobs; localStorage could not) ---
 
-const openDb = (): Promise<IDBDatabase> =>
+// Version 2 added the media library store (services/mediaLibrary.ts).
+export const openDb = (): Promise<IDBDatabase> =>
   new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
-    req.onupgradeneeded = () => req.result.createObjectStore(STORE);
+    const req = indexedDB.open(DB_NAME, 2);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
+      if (!db.objectStoreNames.contains(LIBRARY_STORE)) db.createObjectStore(LIBRARY_STORE, { keyPath: 'id' });
+    };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
 
+// Blob URLs die with the page; the file itself is kept and a new URL is made on load.
+const stripUrl = (source: ProjectionSource): ProjectionSource =>
+  ({ ...source, url: source.url.startsWith('blob:') ? '' : source.url });
+
 const strip = (project: SavedProject): SavedProject => ({
   ...project,
-  // Blob URLs die with the page; the file itself is kept and a new URL is made on load.
   layers: project.layers.map(l => ({
     ...l,
     transitionOpacity: 1,
-    source: l.source
-      ? { ...l.source, url: l.source.url.startsWith('blob:') ? '' : l.source.url }
-      : null,
+    source: l.source ? stripUrl(l.source) : null,
+    playlist: l.playlist ? { ...l.playlist, items: l.playlist.items.map(stripUrl) } : l.playlist,
   })),
 });
 
@@ -72,12 +80,27 @@ export const loadFromBrowser = async (): Promise<SavedProject | null> => {
   };
 };
 
-const withUrls = (project: SavedProject): SavedProject => ({
-  ...project,
-  layers: project.layers.map(l =>
-    l.source?.file ? { ...l, source: { ...l.source, url: URL.createObjectURL(l.source.file) } } : l
-  ),
-});
+const withUrls = (project: SavedProject): SavedProject => {
+  // One URL per file: a playlist's current video is the same file as the layer's source.
+  const urls = new Map<Blob, string>();
+  const withUrl = (source: ProjectionSource): ProjectionSource => {
+    if (!source.file) return source;
+    let url = urls.get(source.file);
+    if (!url) {
+      url = URL.createObjectURL(source.file);
+      urls.set(source.file, url);
+    }
+    return { ...source, url };
+  };
+  return {
+    ...project,
+    layers: project.layers.map(l => ({
+      ...l,
+      source: l.source ? withUrl(l.source) : l.source,
+      playlist: l.playlist ? { ...l.playlist, items: l.playlist.items.map(withUrl) } : l.playlist,
+    })),
+  };
+};
 
 // --- Show file (.lumamap): settings and media in one file, to move a show between devices ---
 //
@@ -90,17 +113,26 @@ interface FileEntry { name: string; type: string; size: number }
 export const exportShowFile = (project: SavedProject): Blob => {
   const files: FileEntry[] = [];
   const blobs: Blob[] = [];
+  const indexOf = new Map<Blob, number>();
   const addFile = (blob: Blob, name: string) => {
+    const known = indexOf.get(blob);
+    if (known !== undefined) return known;
     files.push({ name, type: blob.type, size: blob.size });
     blobs.push(blob);
+    indexOf.set(blob, files.length - 1);
     return files.length - 1;
   };
+  const pack = (s: ProjectionSource) => {
+    if (!s.file) return s;
+    const { file, ...source } = s;
+    return { ...source, fileIndex: addFile(file, source.name) };
+  };
 
-  const layers = strip(project).layers.map(l => {
-    if (!l.source?.file) return l;
-    const { file, ...source } = l.source;
-    return { ...l, source: { ...source, fileIndex: addFile(file, source.name) } };
-  });
+  const layers = strip(project).layers.map(l => ({
+    ...l,
+    source: l.source ? pack(l.source) : l.source,
+    playlist: l.playlist ? { ...l.playlist, items: l.playlist.items.map(pack) } : l.playlist,
+  }));
   const background = project.backgroundFile ? addFile(project.backgroundFile, 'background') : null;
 
   const header = new TextEncoder().encode(JSON.stringify({
@@ -133,11 +165,16 @@ export const parseShowFile = (buffer: ArrayBuffer): SavedProject => {
     return file;
   });
 
-  const layers: Layer[] = data.layers.map((l: any) => {
-    if (l.source?.fileIndex === undefined) return l;
-    const { fileIndex, ...source } = l.source;
-    return { ...l, source: { ...source, file: files[fileIndex] } };
-  });
+  const unpack = (s: any) => {
+    if (s?.fileIndex === undefined) return s;
+    const { fileIndex, ...source } = s;
+    return { ...source, file: files[fileIndex] };
+  };
+  const layers: Layer[] = data.layers.map((l: any) => ({
+    ...l,
+    source: unpack(l.source),
+    playlist: l.playlist ? { ...l.playlist, items: l.playlist.items.map(unpack) } : l.playlist,
+  }));
 
   return withUrls({
     layers,

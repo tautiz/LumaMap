@@ -3,10 +3,13 @@ import { AppMode, ContentType, Layer, Transform, KeyMap, ShortcutAction } from '
 import { generateTexture } from '../services/gemini';
 import { TranslationKey, formatKey, useI18n } from '../i18n';
 import LanguageSwitcher from './LanguageSwitcher';
+import MediaLibraryDialog from './MediaLibraryDialog';
+import { playVideos, playlistStep } from '../services/mediaLibrary';
 import {
   Upload, Monitor, Square, Layers, Sparkles, Move, Play, Image as ImageIcon, Save, FolderOpen, ExternalLink,
   Eye, EyeOff, Move3d, Plus, Trash2, ChevronUp, ChevronDown, Lock, Unlock, Settings, Copy, Keyboard,
-  HelpCircle, Lightbulb, ArrowRight, Maximize, MousePointer2, ChevronRight, Download, Power, Link
+  HelpCircle, Lightbulb, ArrowRight, Maximize, MousePointer2, ChevronRight, Download, Power, Link,
+  Film, SkipBack, SkipForward, Repeat
 } from 'lucide-react';
 
 interface ControlPanelProps {
@@ -118,6 +121,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   const [texturePrompt, setTexturePrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [recordingAction, setRecordingAction] = useState<ShortcutAction | null>(null);
+  const [libraryOpen, setLibraryOpen] = useState(false);
 
   const activeLayer = layers.find(l => l.id === activeLayerId);
 
@@ -161,7 +165,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
             url,
             name: file.name,
             file: file
-          }
+          },
+          playlist: null
       });
     }
   };
@@ -193,6 +198,12 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
 
   return (
     <div className="absolute top-0 left-0 h-full w-96 bg-slate-900/95 backdrop-blur-md border-r border-slate-700 flex flex-col shadow-2xl z-50">
+      {libraryOpen && activeLayer && (
+        <MediaLibraryDialog
+          onClose={() => setLibraryOpen(false)}
+          onPick={(sources, loop) => onUpdateLayer(activeLayer.id, playVideos(activeLayer, sources, loop))}
+        />
+      )}
       {/* HEADER */}
       <div className="p-5 pb-4 space-y-4 border-b border-slate-800">
         <div className="flex justify-between items-center">
@@ -450,7 +461,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                   <span className="text-xs font-medium text-slate-200">{t('map.selected.upload')}</span>
                 </label>
                 <button
-                  onClick={() => onUpdateLayer(activeLayer.id, { source: { type: ContentType.SOLID_COLOR, url: '', name: 'Grid Pattern' } })}
+                  onClick={() => onUpdateLayer(activeLayer.id, { source: { type: ContentType.SOLID_COLOR, url: '', name: 'Grid Pattern' }, playlist: null })}
                   className="border-2 border-slate-700 bg-slate-900 rounded-xl p-3 flex flex-col items-center gap-1.5 hover:border-emerald-500 transition-colors"
                 >
                   <Square size={24} className="text-emerald-400" />
@@ -458,7 +469,44 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                 </button>
               </div>
 
+              <button
+                onClick={() => setLibraryOpen(true)}
+                className="w-full border-2 border-slate-700 bg-slate-900 rounded-xl p-2.5 flex items-center justify-center gap-2 hover:border-orange-500 transition-colors"
+              >
+                <Film size={20} className="text-orange-400" />
+                <span className="text-sm font-medium text-slate-200">🎃 {t('map.selected.library')}</span>
+              </button>
+
               <p className="text-xs text-slate-400 truncate">{t('map.selected.current', { name: sourceLabel(activeLayer) })}</p>
+
+              {activeLayer.playlist && activeLayer.playlist.items.length > 1 && (() => {
+                const playlist = activeLayer.playlist;
+                const step = (dir: 1 | -1) => {
+                  const updates = playlistStep(activeLayer, dir);
+                  if (updates) onUpdateLayer(activeLayer.id, updates);
+                };
+                const ended = !playlist.loop && !activeLayer.playback.isPlaying && playlist.index === playlist.items.length - 1;
+                return (
+                  <div className="rounded-lg border border-orange-500/40 bg-orange-500/10 p-2.5 space-y-2">
+                    <div className="flex items-center gap-1">
+                      <span className="flex-1 text-xs font-semibold text-orange-200">
+                        {ended ? t('map.playlist.stopped') : t('map.playlist.title', { n: playlist.index + 1, total: playlist.items.length })}
+                      </span>
+                      <IconButton onClick={() => step(-1)} label={t('map.playlist.prev')} className="text-slate-200"><SkipBack size={16} /></IconButton>
+                      <IconButton onClick={() => step(1)} label={t('map.playlist.next')} className="text-slate-200"><SkipForward size={16} /></IconButton>
+                    </div>
+                    <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={playlist.loop}
+                        onChange={(e) => onUpdateLayer(activeLayer.id, { playlist: { ...playlist, loop: e.target.checked } })}
+                        className="accent-orange-500"
+                      />
+                      <Repeat size={14} /> {t('map.playlist.loop')}
+                    </label>
+                  </div>
+                );
+              })()}
 
               <label className="block space-y-1">
                 <span className="text-xs text-slate-400">{t('map.selected.name')}</span>
