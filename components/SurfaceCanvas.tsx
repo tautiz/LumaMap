@@ -123,14 +123,24 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
                 video.src = layer.source.url;
             }
 
+            // Mute before play(): browsers only autoplay muted video without a click or key press.
+            if (video.muted !== layer.playback.isMuted) video.muted = layer.playback.isMuted;
+            if (Math.abs(video.volume - layer.playback.volume) > 0.05) video.volume = layer.playback.volume;
+
             if (layer.playback.isPlaying && video.paused) {
-                video.play().catch(e => { });
+                const v = video;
+                v.play().catch(() => {
+                    // Video with sound is blocked until the viewer interacts: play muted now, unmute on first input.
+                    if (v.muted) return;
+                    v.muted = true;
+                    v.play().catch(() => { });
+                    const unmute = () => { v.muted = false; v.play().catch(() => { }); };
+                    window.addEventListener('pointerdown', unmute, { once: true });
+                    window.addEventListener('keydown', unmute, { once: true });
+                });
             } else if (!layer.playback.isPlaying && !video.paused) {
                 video.pause();
             }
-
-            if (video.muted !== layer.playback.isMuted) video.muted = layer.playback.isMuted;
-            if (Math.abs(video.volume - layer.playback.volume) > 0.05) video.volume = layer.playback.volume;
 
             const timeDiff = Math.abs(video.currentTime - layer.playback.currentTime);
             // Allow a larger drift during transitions (video restart) to avoid fighting
