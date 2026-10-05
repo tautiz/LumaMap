@@ -113,3 +113,38 @@ function computeTriangles(points: ControlPoint[]): number[] {
     const delaunay = new Delaunator(coords);
     return Array.from(delaunay.triangles);
 }
+// --- Rotation ---
+//
+// Turning an element turns its points on the wall. The texture coordinates stay, so the content, the grid
+// and the effects turn with it, and the projector window (which gets the same points) shows the same picture.
+
+/** The middle of the points (their average), which stays in place when the points are turned around it. */
+export function pointsCentre(points: ControlPoint[]): { x: number; y: number } {
+    if (!points.length) return { x: 0, y: 0 };
+    let x = 0, y = 0;
+    for (const p of points) { x += p.x; y += p.y; }
+    return { x: x / points.length, y: y / points.length };
+}
+
+/** The points turned clockwise by `degrees` around `centre` (by default their own middle). */
+export function rotatePoints(points: ControlPoint[], degrees: number, centre = pointsCentre(points)): ControlPoint[] {
+    if (!degrees) return points;
+    const r = degrees * Math.PI / 180;
+    const cos = Math.cos(r), sin = Math.sin(r);
+    return points.map(p => {
+        const dx = p.x - centre.x, dy = p.y - centre.y;
+        return { ...p, x: centre.x + dx * cos - dy * sin, y: centre.y + dx * sin + dy * cos };
+    });
+}
+
+/** An angle as -180…180 degrees, rounded to a tenth. */
+export function normalizeAngle(degrees: number): number {
+    const a = ((((degrees + 180) % 360) + 360) % 360) - 180;
+    return Math.round(a * 10) / 10;
+}
+
+/** Changes that turn an element to `degrees`, keeping its middle in place. */
+export function rotationUpdate(layer: { points: ControlPoint[]; rotation?: number }, degrees: number) {
+    const rotation = normalizeAngle(degrees);
+    return { rotation, points: rotatePoints(layer.points, rotation - (layer.rotation ?? 0)) };
+}

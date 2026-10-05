@@ -94,8 +94,8 @@ const GridSettingsPanel: React.FC<GridSettingsPanelProps> = ({ layer, gridDefaul
       return;
     }
     const updates: Partial<Layer> = { grid: next };
-    if (gridAspect(next) !== gridAspect(grid) && isPlainRectangle(layer.points)) {
-      updates.points = proportionalPoints(gridAspect(next), projectorSize, layer.points);
+    if (gridAspect(next) !== gridAspect(grid) && isPlainRectangle(layer.points, layer.rotation)) {
+      updates.points = proportionalPoints(gridAspect(next), projectorSize, layer.points, layer.rotation);
     }
     onUpdateLayer(layer.id, updates);
   };
@@ -139,9 +139,9 @@ const GridSettingsPanel: React.FC<GridSettingsPanelProps> = ({ layer, gridDefaul
           <NumberField label={t('grid.width')} suffix={grid.unit} value={grid.width / factor} onChange={(v) => update({ width: v * factor })} />
           <NumberField label={t('grid.height')} suffix={grid.unit} value={grid.height / factor} onChange={(v) => update({ height: v * factor })} />
         </div>
-        {!isPlainRectangle(layer.points) && (
+        {!isPlainRectangle(layer.points, layer.rotation) && (
           <button
-            onClick={() => onUpdateLayer(layer.id, { points: proportionalPoints(gridAspect(grid), projectorSize, layer.points) })}
+            onClick={() => onUpdateLayer(layer.id, { points: proportionalPoints(gridAspect(grid), projectorSize, layer.points, layer.rotation) })}
             className="w-full mt-1 py-1.5 rounded-lg bg-slate-800 text-slate-200 text-xs hover:bg-slate-700 flex items-center justify-center gap-1.5"
           >
             <RectangleHorizontal size={14} /> {t('grid.reshape')}

@@ -131,8 +131,8 @@ const App: React.FC = () => {
     setGridDefaults(next);
     if (!aspectChanged) return;
     setLayers(prev => prev.map(l =>
-      !l.grid && l.source?.type === ContentType.SOLID_COLOR && isPlainRectangle(l.points)
-        ? { ...l, points: proportionalPoints(gridAspect(next), projectorSize, l.points) }
+      !l.grid && l.source?.type === ContentType.SOLID_COLOR && isPlainRectangle(l.points, l.rotation)
+        ? { ...l, points: proportionalPoints(gridAspect(next), projectorSize, l.points, l.rotation) }
         : l
     ));
   };

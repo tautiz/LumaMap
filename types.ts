@@ -83,6 +83,7 @@ export interface Layer {
   // Effects drawn with or without content, in order (effects/). The content itself is never changed.
   effects?: EffectInstance[];
   color?: string; // The element's colour, followed by effects set to "element colour" (plain colour content uses its own)
+  rotation?: number; // How far the element is turned, clockwise in degrees (-180…180). The points already include it.
 }
 
 export interface ProjectorState {
