@@ -1,29 +1,34 @@
 import { registerEffect } from '../registry';
-import { TextureFxArgs } from '../types';
-import { bool, num, rand, str } from '../util';
+import { ParamValue, TextureFxArgs } from '../types';
+import { bool, fitRate, num, rand, str, wrap } from '../util';
 
 // Modifiers change the picture they get (input) and draw the changed picture. Without input they draw nothing.
 
+const COLS_SPEED = 1.13;
+const waveLoop = { kind: 'loop' as const, rates: (p: Record<string, ParamValue>) => [num(p, 'speed'), num(p, 'speed') * COLS_SPEED] };
+
 // Water ripple and slow wave: the picture is cut into thin strips that are pushed sideways along a sine wave.
 const displace = (a: TextureFxArgs, amp: number, wavelength: number, speed: number, direction: string) => {
-  const { ctx, input, w, h, m, time, progress, scratch } = a;
+  const { ctx, input, w, h, m, time, progress, scratch, loop } = a;
   if (!input) return;
   const env = progress !== null ? Math.sin(Math.PI * progress) : 1;
   const ampPx = amp * m * 0.04 * env;
   const k = (Math.PI * 2) / Math.max(0.02, wavelength * m * 0.2);
-  const ph = time * speed * Math.PI * 2;
+  // Rows and columns move at slightly different speeds (x 1.13), so the wave does not look mechanical.
+  const phRows = time * fitRate(speed, loop) * Math.PI * 2;
+  const phCols = time * fitRate(speed * COLS_SPEED, loop) * Math.PI * 2;
   const strip = Math.max(2, Math.round(m / 180));
 
   // Each strip is stretched by the wave's height on both ends, so pushing it never opens a gap at the edges.
   const rows = (src: CanvasImageSource, dst: CanvasRenderingContext2D) => {
     for (let y = 0; y < h; y += strip) {
-      const dx = Math.sin(y * k + ph) * ampPx;
+      const dx = Math.sin(y * k + phRows) * ampPx;
       dst.drawImage(src, 0, y, w, strip, dx - ampPx, y, w + ampPx * 2, strip);
     }
   };
   const cols = (src: CanvasImageSource, dst: CanvasRenderingContext2D) => {
     for (let x = 0; x < w; x += strip) {
-      const dy = Math.sin(x * k + ph * 1.13) * ampPx;
+      const dy = Math.sin(x * k + phCols) * ampPx;
       dst.drawImage(src, x, 0, strip, h, x, dy - ampPx, strip, h + ampPx * 2);
     }
   };
@@ -43,6 +48,7 @@ registerEffect({
     { key: 'speed', type: 'number', min: 0, max: 3, step: 0.05, default: 0.8 },
     { key: 'direction', type: 'select', options: ['horizontal', 'vertical', 'both'], default: 'both' },
   ],
+  loop: waveLoop,
   renderTexture: a => displace(a, num(a.params, 'amount') * a.intensity * 1.4, num(a.params, 'wavelength', 0.9), num(a.params, 'speed'), str(a.params, 'direction')),
 });
 
@@ -54,6 +60,7 @@ registerEffect({
     { key: 'speed', type: 'number', min: 0, max: 2, step: 0.05, default: 0.2 },
     { key: 'direction', type: 'select', options: ['horizontal', 'vertical', 'both'], default: 'vertical' },
   ],
+  loop: waveLoop,
   renderTexture: a => displace(a, num(a.params, 'amount') * a.intensity * 1.4, num(a.params, 'wavelength', 3), num(a.params, 'speed'), str(a.params, 'direction')),
 });
 
@@ -65,10 +72,11 @@ registerEffect({
     { key: 'rate', type: 'number', min: 1, max: 30, step: 1, default: 8 },
     { key: 'slices', type: 'number', min: 1, max: 30, step: 1, default: 8 },
   ],
-  renderTexture: ({ ctx, input, w, h, time, progress, params, intensity, seed }) => {
+  loop: { kind: 'random', rates: p => [num(p, 'rate', 8)] },
+  renderTexture: ({ ctx, input, w, h, time, progress, params, intensity, seed, loop }) => {
     if (!input) return;
     ctx.drawImage(input, 0, 0);
-    const bucket = Math.floor(time * num(params, 'rate', 8));
+    const bucket = Math.floor(time * fitRate(num(params, 'rate', 8), loop));
     const s = seed + bucket * 7919;
     const amount = num(params, 'amount', 0.5) * intensity * (progress !== null ? 1 - progress : 1);
     if (progress === null && rand(s, 0) > 0.3 + amount * 0.7) return; // Quiet moments in between
@@ -84,6 +92,7 @@ registerEffect({
 });
 
 // RGB split: the red, green and blue parts of the picture drift apart.
+const JITTER_RATE = 12; // Jumps per second
 registerEffect({
   id: 'rgbSplit', role: 'modifier', inputMode: 'required', space: 'texture',
   animated: p => p.jitter === true,
@@ -92,12 +101,13 @@ registerEffect({
     { key: 'angle', type: 'number', min: 0, max: 360, step: 5, default: 0 },
     { key: 'jitter', type: 'bool', default: true },
   ],
-  renderTexture: ({ ctx, input, w, h, m, time, params, intensity, seed, scratch }) => {
+  loop: { kind: 'random', rates: () => [JITTER_RATE] },
+  renderTexture: ({ ctx, input, w, h, m, time, params, intensity, seed, scratch, loop }) => {
     if (!input) return;
     let amount = num(params, 'amount', 0.3) * intensity * m * 0.03;
     let ang = (num(params, 'angle') * Math.PI) / 180;
     if (bool(params, 'jitter')) {
-      const b = Math.floor(time * 12);
+      const b = Math.floor(time * fitRate(JITTER_RATE, loop));
       amount *= 0.5 + rand(seed, b);
       ang += (rand(seed, b + 1) - 0.5) * 0.6;
     }
@@ -153,10 +163,11 @@ registerEffect({
     { key: 'brightness', type: 'number', min: 0, max: 2, step: 0.05, default: 1 },
     { key: 'tint', type: 'number', min: 0, max: 1, step: 0.05, default: 0.5 },
   ],
+  loop: { kind: 'loop', rates: p => [num(p, 'cycle')] },
   defaults: { color: { mode: 'custom', color: '#2d6bff' } },
-  renderTexture: ({ ctx, input, w, h, time, params, intensity, color, scratch }) => {
+  renderTexture: ({ ctx, input, w, h, time, params, intensity, color, scratch, loop }) => {
     if (!input) return;
-    const hue = num(params, 'hue') + time * num(params, 'cycle') * 360;
+    const hue = wrap(num(params, 'hue') + time * fitRate(num(params, 'cycle'), loop) * 360, 360);
     ctx.filter = `hue-rotate(${hue.toFixed(1)}deg) saturate(${num(params, 'saturation', 1)}) brightness(${num(params, 'brightness', 1)})`;
     ctx.drawImage(input, 0, 0);
     ctx.filter = 'none';
@@ -182,9 +193,10 @@ registerEffect({
     { key: 'depth', type: 'number', min: 0, max: 1, step: 0.05, default: 0.5 },
     { key: 'style', type: 'select', options: ['fade', 'brighten'], default: 'fade' },
   ],
-  renderTexture: ({ ctx, input, time, progress, params, intensity }) => {
+  loop: { kind: 'loop', rates: p => [num(p, 'speed', 0.8)] },
+  renderTexture: ({ ctx, input, time, progress, params, intensity, loop }) => {
     if (!input) return;
-    const v = progress !== null ? Math.sin(Math.PI * progress) : 0.5 + 0.5 * Math.sin(time * num(params, 'speed', 0.8) * Math.PI * 2);
+    const v = progress !== null ? Math.sin(Math.PI * progress) : 0.5 + 0.5 * Math.sin(time * fitRate(num(params, 'speed', 0.8), loop) * Math.PI * 2);
     const depth = num(params, 'depth', 0.5) * intensity;
     if (str(params, 'style') === 'brighten') {
       ctx.drawImage(input, 0, 0);

@@ -1,6 +1,6 @@
 import { registerEffect } from '../registry';
 import { TextureFxArgs } from '../types';
-import { glowStroke, num, rand, rgba, str } from '../util';
+import { fitPeriod, wrap, fitRate, glowStroke, num, rand, rgba, str } from '../util';
 
 // Overlays draw an extra layer that is laid over (or, with placement "under", behind) the picture.
 
@@ -14,11 +14,12 @@ registerEffect({
     { key: 'thickness', type: 'number', min: 0.2, max: 4, step: 0.1, default: 1 },
     { key: 'lines', type: 'number', min: 1, max: 4, step: 1, default: 2 },
   ],
+  loop: { kind: 'random', rates: p => [num(p, 'flicker', 12)] },
   defaults: { blend: 'add', color: { mode: 'element' } },
-  renderTexture: ({ ctx, w, h, m, time, progress, params, intensity, color, seed }) => {
+  renderTexture: ({ ctx, w, h, m, time, progress, params, intensity, color, seed, loop }) => {
     const inset = num(params, 'inset', 0.03) * m;
     const rough = num(params, 'roughness', 0.5) * m * 0.025;
-    const bucket = Math.floor(time * num(params, 'flicker', 12));
+    const bucket = Math.floor(time * fitRate(num(params, 'flicker', 12), loop));
     const lines = num(params, 'lines', 2);
     const x0 = inset, y0 = inset, x1 = w - inset, y1 = h - inset;
     const per = 2 * ((x1 - x0) + (y1 - y0));
@@ -111,9 +112,10 @@ registerEffect({
     { key: 'width', type: 'number', min: 0.05, max: 1, step: 0.05, default: 0.25 },
     { key: 'angle', type: 'number', min: 0, max: 180, step: 5, default: 30 },
   ],
+  loop: { kind: 'loop', rates: p => [1 / num(p, 'period', 4)] },
   defaults: { blend: 'add', color: { mode: 'custom', color: '#ffffff' } },
-  renderTexture: ({ ctx, w, h, m, time, progress, params, intensity, color }) => {
-    const p = progress ?? (time / num(params, 'period', 4)) % 1;
+  renderTexture: ({ ctx, w, h, m, time, progress, params, intensity, color, loop }) => {
+    const p = progress ?? wrap(time / fitPeriod(num(params, 'period', 4), loop), 1);
     const half = Math.hypot(w, h) / 2;
     const bw = num(params, 'width', 0.25) * m;
     const x = -half - bw + p * (2 * half + 2 * bw);
@@ -135,10 +137,12 @@ registerEffect({
     { key: 'spacing', type: 'number', min: 0.003, max: 0.05, step: 0.001, default: 0.01 },
     { key: 'speed', type: 'number', min: 0, max: 2, step: 0.05, default: 0.2 },
   ],
+  // The lines move speed x 0.1 x the element's size per second, and look the same again after one gap.
+  loop: { kind: 'loop', rates: p => [(num(p, 'speed') * 0.1) / Math.max(0.001, num(p, 'spacing', 0.01))] },
   defaults: { blend: 'normal', opacity: 0.5, color: { mode: 'custom', color: '#000000' } },
-  renderTexture: ({ ctx, w, h, m, time, params, intensity, color }) => {
+  renderTexture: ({ ctx, w, h, m, time, params, intensity, color, loop }) => {
     const gap = Math.max(2, num(params, 'spacing', 0.01) * m);
-    const off = (time * num(params, 'speed') * m * 0.1) % gap;
+    const off = wrap(time * fitRate((num(params, 'speed') * m * 0.1) / gap, loop) * gap, gap);
     ctx.fillStyle = color;
     ctx.globalAlpha = 0.3 + 0.7 * intensity;
     for (let y = off - gap; y < h; y += gap) ctx.fillRect(0, y, w, gap / 2);
@@ -152,12 +156,13 @@ registerEffect({
     { key: 'rate', type: 'number', min: 0.2, max: 10, step: 0.1, default: 2 },
     { key: 'chance', type: 'number', min: 0, max: 1, step: 0.05, default: 0.2 },
   ],
+  loop: { kind: 'random', rates: p => [num(p, 'rate', 2)] },
   defaults: { blend: 'add', color: { mode: 'custom', color: '#ffffff' }, trigger: { mode: 'signal', duration: 0.6 } },
-  renderTexture: ({ ctx, w, h, time, progress, params, intensity, color, seed }) => {
+  renderTexture: ({ ctx, w, h, time, progress, params, intensity, color, seed, loop }) => {
     let a: number;
     if (progress !== null) a = (1 - progress) ** 2;
     else {
-      const t = time * num(params, 'rate', 2);
+      const t = time * fitRate(num(params, 'rate', 2), loop);
       const b = Math.floor(t);
       a = rand(seed, b) < num(params, 'chance', 0.2) ? (1 - (t - b)) ** 3 : 0;
     }
@@ -176,9 +181,10 @@ registerEffect({
     { key: 'thickness', type: 'number', min: 0.2, max: 4, step: 0.1, default: 1 },
     { key: 'origin', type: 'select', options: ['center', 'bottom', 'top'], default: 'center' },
   ],
+  loop: { kind: 'loop', rates: p => [1 / num(p, 'period', 2)] },
   defaults: { blend: 'add', color: { mode: 'element' }, trigger: { mode: 'signal', duration: 1.2 } },
-  renderTexture: ({ ctx, w, h, m, time, progress, params, intensity, color }) => {
-    const p = progress ?? (time / num(params, 'period', 2)) % 1;
+  renderTexture: ({ ctx, w, h, m, time, progress, params, intensity, color, loop }) => {
+    const p = progress ?? wrap(time / fitPeriod(num(params, 'period', 2), loop), 1);
     const origin = str(params, 'origin', 'center');
     const cy = origin === 'bottom' ? h : origin === 'top' ? 0 : h / 2;
     const r = p * Math.hypot(w, h) * (origin === 'center' ? 0.6 : 1);

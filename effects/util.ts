@@ -3,6 +3,29 @@ import { ParamValue } from './types';
 // Small helpers shared by the effects. Randomness is a hash of (seed, index), never Math.random(), so the
 // editor and the projector window draw exactly the same sparks at the same moment.
 
+/**
+ * A speed (cycles per second) nudged so a whole number of cycles fits in the loop, at least one.
+ * Outside a looping export (loop = null) the speed is left as it is.
+ */
+export const fitRate = (rate: number, loop: number | null): number => {
+  if (!loop || !(rate > 0) || !Number.isFinite(rate)) return rate;
+  return Math.max(1, Math.round(rate * loop)) / loop;
+};
+
+/** fitRate for an angle speed in radians per second (as in Math.sin(time * w)). */
+export const fitAngular = (w: number, loop: number | null): number => (fitRate(Math.abs(w) / TAU, loop) * TAU) * Math.sign(w);
+
+/** fitRate for a period in seconds (one cycle every `period` seconds). */
+export const fitPeriod = (period: number, loop: number | null): number => (loop && period > 0 ? 1 / fitRate(1 / period, loop) : period);
+
+export const TAU = Math.PI * 2;
+
+/** v within [0, period); rounding error just under a whole period counts as 0, so a loop ends where it began. */
+export const wrap = (v: number, period: number) => {
+  const r = ((v % period) + period) % period;
+  return period - r < period * 1e-9 ? 0 : r;
+};
+
 export const rand = (seed: number, i: number): number => {
   let x = (seed ^ Math.imul(i + 0x9e3779b9, 0x85ebca6b)) >>> 0;
   x = Math.imul(x ^ (x >>> 16), 0x7feb352d) >>> 0;

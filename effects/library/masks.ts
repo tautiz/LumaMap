@@ -1,6 +1,6 @@
 import { registerEffect } from '../registry';
-import { ParamDef, TextureFxArgs } from '../types';
-import { num, rand, str } from '../util';
+import { ParamDef, ParamValue, TextureFxArgs } from '../types';
+import { fitPeriod, wrap, num, rand, str } from '../util';
 
 // Masks draw where the picture stays visible (opaque) and where it disappears (transparent).
 // The amount comes from the signal while one runs, from a loop when "animate" is on, and from the slider otherwise.
@@ -13,10 +13,12 @@ const maskParams = (extra: ParamDef[] = []): ParamDef[] => [
   ...extra,
 ];
 
-const amountOf = ({ time, progress, params }: TextureFxArgs) => {
+const maskLoop = { kind: 'loop' as const, rates: (p: Record<string, ParamValue>) => [1 / num(p, 'period', 4)] };
+
+const amountOf = ({ time, progress, params, loop }: TextureFxArgs) => {
   if (progress !== null) return progress;
   if (params.animate === true) {
-    const p = (time / num(params, 'period', 4)) % 1;
+    const p = wrap(time / fitPeriod(num(params, 'period', 4), loop), 1);
     return p < 0.5 ? p * 2 : 2 - p * 2; // Reveal, then hide again
   }
   return num(params, 'amount', 0.6);
@@ -26,6 +28,7 @@ registerEffect({
   id: 'radialReveal', role: 'mask', inputMode: 'required', space: 'texture',
   animated: p => p.animate === true,
   params: maskParams(),
+  loop: maskLoop,
   defaults: { trigger: { duration: 2 } },
   renderTexture: (a) => {
     const { ctx, w, h, params } = a;
@@ -46,6 +49,7 @@ registerEffect({
   id: 'wipe', role: 'mask', inputMode: 'required', space: 'texture',
   animated: p => p.animate === true,
   params: maskParams([{ key: 'direction', type: 'select', options: ['right', 'left', 'down', 'up'], default: 'right' }]),
+  loop: maskLoop,
   defaults: { trigger: { duration: 2 } },
   renderTexture: (a) => {
     const { ctx, w, h, params } = a;
@@ -75,6 +79,7 @@ registerEffect({
   id: 'noiseReveal', role: 'mask', inputMode: 'required', space: 'texture',
   animated: p => p.animate === true,
   params: maskParams([{ key: 'blocks', type: 'number', min: 4, max: 80, step: 1, default: 24 }]).filter(p => p.key !== 'softness'),
+  loop: maskLoop,
   defaults: { trigger: { duration: 2 } },
   renderTexture: (a) => {
     const { ctx, w, h, params, seed } = a;

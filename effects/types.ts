@@ -80,6 +80,7 @@ export interface TextureFxArgs {
   color: string;
   colorMode: ColorSourceMode;
   seed: number; // Stable per effect, so two copies of an effect do not move in step
+  loop: number | null; // Looping video export: the loop length in seconds (fit speeds with fitRate); null otherwise
   scratch: (index: number) => CanvasRenderingContext2D; // Extra w x h canvases, cleared
 }
 
@@ -99,6 +100,20 @@ export interface ScreenFxArgs {
   color: string;
   colorMode: ColorSourceMode;
   seed: number;
+  loop: number | null;
+}
+
+/**
+ * How an effect takes part in a looping video export (see effects/loop.ts).
+ * - 'loop': it moves in cycles; each speed is nudged so a whole number of cycles fits the loop.
+ * - 'random': it changes at random moments; the changes keep their seed, and the random sequence starts
+ *   over with every loop, so the end joins the start like any other random change.
+ * An effect that moves and declares neither cannot be made to loop.
+ */
+export interface LoopSupport {
+  kind: 'loop' | 'random';
+  /** Every speed the effect uses with these settings, in cycles (or random changes) per second. */
+  rates: (params: Record<string, ParamValue>) => number[];
 }
 
 export interface EffectDefinition {
@@ -109,6 +124,7 @@ export interface EffectDefinition {
   /** Moves by itself, so the picture must be redrawn every frame while it is on. */
   animated: boolean | ((params: Record<string, ParamValue>) => boolean);
   params: ParamDef[];
+  loop?: LoopSupport;
   defaults?: Partial<Pick<EffectInstance, 'blend' | 'opacity' | 'intensity' | 'placement'>> & {
     color?: Partial<ColorSource>;
     trigger?: Partial<EffectTrigger>;
