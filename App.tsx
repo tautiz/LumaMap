@@ -3,9 +3,10 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import ControlPanel from './components/ControlPanel';
 import SurfaceCanvas from './components/SurfaceCanvas';
 import HelpDialog from './components/HelpDialog';
+import CalibrationDialog from './components/CalibrationDialog';
 import { useI18n } from './i18n';
 import { HelpCircle, Monitor, Move, Play, SlidersHorizontal } from 'lucide-react';
-import { AppMode, Layer, ControlPoint, ProjectionSource, ContentType, Transform, KeyMap, ShortcutAction, GridSettings } from './types';
+import { AppMode, Layer, ControlPoint, ProjectionSource, ContentType, Transform, KeyMap, ShortcutAction, GridSettings, PhotoCalibration } from './types';
 import { DEFAULT_GRID, gridAspect, isPlainRectangle, proportionalPoints } from './utils/grid';
 import { playlistStep } from './services/mediaLibrary';
 import { fireSignals, newId } from './effects';
@@ -66,6 +67,12 @@ const App: React.FC = () => {
   
   const [backgroundTransform, setBackgroundTransform] = useState<Transform>({ x: 0, y: 0, k: 1 });
   const [isEditingBackground, setIsEditingBackground] = useState(false);
+  // Where the projector picture is on the wall photo, so the photo can be straightened onto it.
+  const [backgroundCalibration, setBackgroundCalibration] = useState<PhotoCalibration | null>(null);
+  // The calibration dialog is open; meanwhile the projector shows the test pattern. Not saved.
+  const [calibrating, setCalibrating] = useState(false);
+  const calibratingRef = useRef(false);
+  calibratingRef.current = calibrating;
 
   // Default Resolution set to 2363x1320
   const [projectorSize, setProjectorSize] = useState<{ w: number, h: number }>({ w: 2363, h: 1320 });
@@ -263,6 +270,8 @@ const App: React.FC = () => {
       bgId: backgroundFile ? mediaIdOf(backgroundFile) : undefined,
       bgTransform: backgroundTransform,
       showBg: showBackgroundInLive,
+      bgCalibration: backgroundCalibration,
+      calibrationPattern: calibrating,
       projSize: projectorSize,
       gridDefaults,
       projectorFrame: showProjectorFrame
@@ -300,13 +309,15 @@ const App: React.FC = () => {
 
       if (isReceiver) {
         if (type === 'SYNC') {
-            const { layers: normLayers, bgUrl, bgFile, bgId, bgTransform, showBg, projSize, gridDefaults: grid, projectorFrame } = payload;
+            const { layers: normLayers, bgUrl, bgFile, bgId, bgTransform, showBg, bgCalibration, calibrationPattern, projSize, gridDefaults: grid, projectorFrame } = payload;
             setReceiverConnected(true);
             setReceiverFallback('none');
 
             if (projSize) setProjectorSize(projSize);
             if (grid) setGridDefaults(grid);
             setShowProjectorFrame(!!projectorFrame);
+            setBackgroundCalibration(bgCalibration ?? null);
+            setCalibrating(!!calibrationPattern);
 
             const usedIds = new Set<string>();
             if (bgId) usedIds.add(bgId);
@@ -380,7 +391,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
       scheduleSync();
-  }, [layers, scheduleSync, backgroundUrl, backgroundFile, backgroundTransform, showBackgroundInLive, projectorSize, gridDefaults, showProjectorFrame]);
+  }, [layers, scheduleSync, backgroundUrl, backgroundFile, backgroundTransform, showBackgroundInLive, backgroundCalibration, calibrating, projectorSize, gridDefaults, showProjectorFrame]);
 
   // Control window: report where its videos are, once a second.
   useEffect(() => {
@@ -592,6 +603,9 @@ const App: React.FC = () => {
 
     // 3. Main Keyboard Handler
     const handleKey = (key: string) => {
+        // The calibration dialog uses the arrow keys itself.
+        if (calibratingRef.current) return;
+
         // Number keys always directly toggle layers 1-9
         if (key >= '1' && key <= '9') {
             const index = parseInt(key) - 1;
@@ -692,6 +706,16 @@ const App: React.FC = () => {
     setBackgroundUrl(url);
     setBackgroundFile(file);
     setBackgroundTransform({ x: 0, y: 0, k: 1 });
+    // The marked corners belonged to the old photo.
+    setBackgroundCalibration(null);
+  };
+
+  const handleApplyCalibration = (calibration: PhotoCalibration) => {
+    setBackgroundCalibration(calibration);
+    // The calibrated photo already sits exactly on the projector picture.
+    setBackgroundTransform({ x: 0, y: 0, k: 1 });
+    setIsEditingBackground(false);
+    setCalibrating(false);
   };
 
   const handleOpenLive = async () => {
@@ -717,6 +741,7 @@ const App: React.FC = () => {
     layers,
     backgroundFile,
     backgroundTransform,
+    backgroundCalibration,
     showBackgroundInLive,
     projectorSize,
     keyMappings,
@@ -728,6 +753,7 @@ const App: React.FC = () => {
     setLayers(project.layers);
     setActiveLayerId(project.layers[0]?.id ?? null);
     setBackgroundTransform(project.backgroundTransform);
+    setBackgroundCalibration(project.backgroundCalibration ?? null);
     setShowBackgroundInLive(project.showBackgroundInLive);
     setBackgroundFile(project.backgroundFile);
     setBackgroundUrl(project.backgroundFile ? URL.createObjectURL(project.backgroundFile) : null);
@@ -859,6 +885,9 @@ const App: React.FC = () => {
 
           backgroundTransform={backgroundTransform}
           setBackgroundTransform={setBackgroundTransform}
+          isPhotoCalibrated={!!backgroundCalibration}
+          onCalibratePhoto={() => { setIsEditingBackground(false); setCalibrating(true); }}
+          onClearCalibration={() => setBackgroundCalibration(null)}
 
           projectorSize={projectorSize}
           setProjectorSize={setProjectorSize}
@@ -894,6 +923,8 @@ const App: React.FC = () => {
           onVideoEnded={handleVideoEnded}
           gridDefaults={gridDefaults}
           showProjectorFrame={showProjectorFrame}
+          backgroundCalibration={backgroundCalibration}
+          calibrationPattern={calibrating}
         />
         
         {!isReceiver && mode === AppMode.SETUP && !backgroundUrl && !welcomeDismissed && (
@@ -964,6 +995,18 @@ const App: React.FC = () => {
             </div>
         )}
       </main>
+
+      {calibrating && !isReceiver && (
+        <CalibrationDialog
+          photoUrl={backgroundUrl}
+          calibration={backgroundCalibration}
+          projectorSize={projectorSize}
+          onUploadPhoto={handleUploadBackground}
+          onOpenLive={handleOpenLive}
+          onApply={handleApplyCalibration}
+          onClose={() => setCalibrating(false)}
+        />
+      )}
 
       {helpOpen && <HelpDialog keyMappings={keyMappings} onClose={() => setHelpOpen(false)} />}
     </div>

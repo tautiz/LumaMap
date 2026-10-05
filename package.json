@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:e2e": "node tests/e2e/export.e2e.mjs"
+    "test:e2e": "node tests/e2e/export.e2e.mjs",
+    "test:e2e:calibration": "node tests/e2e/calibration.e2e.mjs"
   },
   "dependencies": {
     "@google/genai": "^1.30.0",

@@ -1,10 +1,11 @@
-import { GridSettings, KeyMap, Layer, ProjectionSource, Transform } from '../types';
+import { GridSettings, KeyMap, Layer, PhotoCalibration, ProjectionSource, Transform } from '../types';
 
 // A project with its media files kept as Blobs, so nothing has to be uploaded again after opening.
 export interface SavedProject {
   layers: Layer[];
   backgroundFile: Blob | null;
   backgroundTransform: Transform;
+  backgroundCalibration?: PhotoCalibration | null;
   showBackgroundInLive: boolean;
   projectorSize: { w: number; h: number };
   keyMappings?: KeyMap;
@@ -141,6 +142,7 @@ export const exportShowFile = (project: SavedProject): Blob => {
     layers,
     background,
     backgroundTransform: project.backgroundTransform,
+    backgroundCalibration: project.backgroundCalibration ?? null,
     showBackgroundInLive: project.showBackgroundInLive,
     projectorSize: project.projectorSize,
     keyMappings: project.keyMappings,
@@ -182,6 +184,7 @@ export const parseShowFile = (buffer: ArrayBuffer): SavedProject => {
     layers,
     backgroundFile: data.background !== null ? files[data.background] : null,
     backgroundTransform: data.backgroundTransform,
+    backgroundCalibration: data.backgroundCalibration ?? null,
     showBackgroundInLive: !!data.showBackgroundInLive,
     projectorSize: data.projectorSize,
     keyMappings: data.keyMappings,

@@ -86,6 +86,14 @@ export interface Layer {
   rotation?: number; // How far the element is turned, clockwise in degrees (-180…180). The points already include it.
 }
 
+// How the wall photo lines up with the projector picture (utils/calibration.ts).
+export interface PhotoCalibration {
+  // Where the projector picture's corners are on the photo, in the photo's own pixels:
+  // top left, top right, bottom right, bottom left.
+  corners: Point[];
+  lens: number; // Lens bend correction, 0 = none (about -0.3…0.3)
+}
+
 export interface ProjectorState {
   layers: Layer[];
   activeLayerId: string | null;
