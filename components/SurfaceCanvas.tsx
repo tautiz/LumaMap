@@ -1,6 +1,6 @@
 
 import React, { useRef, useEffect, useState } from 'react';
-import { ControlPoint, ContentType, AppMode, Transform, Layer, GridSettings } from '../types';
+import { ControlPoint, ContentType, AppMode, Transform, Layer, GridSettings, PhotoCalibration } from '../types';
 import { DEFAULT_GRID, drawGridTexture, gridKey } from '../utils/grid';
 import { triangulate, getBarycentric, pointInTriangle, pointsCentre, rotatePoints, rotationUpdate, normalizeAngle } from '../utils/math';
 import Draggable from 'react-draggable';
@@ -8,6 +8,8 @@ import { useI18n } from '../i18n';
 import { videoLoops } from '../services/mediaLibrary';
 import { EffectsEngine, drawGradientTexture, gradientKey, layerNeedsFrames } from '../effects';
 import { SceneTextures, drawLayers } from '../utils/scene';
+import { drawCalibrationPattern } from '../utils/calibration';
+import CalibratedPhoto from './CalibratedPhoto';
 import { ZoomIn, ZoomOut, RefreshCw, Play, Pause, Volume2, VolumeX, RotateCw } from 'lucide-react';
 
 interface SurfaceCanvasProps {
@@ -41,6 +43,12 @@ interface SurfaceCanvasProps {
 
   // LIVE: draw a frame around the whole picture, to see where the projector's picture ends.
   showProjectorFrame?: boolean;
+
+  // How the wall photo lines up with the projector picture; without it the photo is just fitted in.
+  backgroundCalibration?: PhotoCalibration | null;
+
+  // Show the calibration test pattern instead of the elements (while the wall photo is being calibrated).
+  calibrationPattern?: boolean;
 }
 
 const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
@@ -58,7 +66,9 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
   videoRegistry,
   onVideoEnded,
   gridDefaults = DEFAULT_GRID,
-  showProjectorFrame = false
+  showProjectorFrame = false,
+  backgroundCalibration = null,
+  calibrationPattern = false
 }) => {
   const { t } = useI18n();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -233,9 +243,9 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
   // torn down and restarted on every state change, and it only redraws when something changed or a
   // video is on screen. Both matter on a Raspberry Pi: a still picture costs no GPU time at all.
 
-  const sceneRef = useRef({ layers, activeLayer, mode, k: transform.k, isEditingBackground, containerSize, gridDefaults, showProjectorFrame });
-  sceneRef.current = { layers, activeLayer, mode, k: transform.k, isEditingBackground, containerSize, gridDefaults, showProjectorFrame };
-  useEffect(() => { dirtyRef.current = true; }, [layers, activeLayer, mode, transform.k, isEditingBackground, containerSize, gridDefaults, showProjectorFrame]);
+  const sceneRef = useRef({ layers, activeLayer, mode, k: transform.k, isEditingBackground, containerSize, gridDefaults, showProjectorFrame, calibrationPattern });
+  sceneRef.current = { layers, activeLayer, mode, k: transform.k, isEditingBackground, containerSize, gridDefaults, showProjectorFrame, calibrationPattern };
+  useEffect(() => { dirtyRef.current = true; }, [layers, activeLayer, mode, transform.k, isEditingBackground, containerSize, gridDefaults, showProjectorFrame, calibrationPattern]);
 
   useEffect(() => {
     let animationFrameId: number;
@@ -281,7 +291,7 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
       animationFrameId = requestAnimationFrame(render);
       if (!canvas || !ctx) return;
 
-      const { layers, activeLayer, mode, k, isEditingBackground, containerSize, gridDefaults, showProjectorFrame } = sceneRef.current;
+      const { layers, activeLayer, mode, k, isEditingBackground, containerSize, gridDefaults, showProjectorFrame, calibrationPattern } = sceneRef.current;
       const now = Date.now();
       const hasVideo = layers.some(l => l.visible && l.source?.type === ContentType.VIDEO);
       const moving = layers.some(l => l.visible && layerNeedsFrames(l, now));
@@ -306,6 +316,12 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
       ctx.setTransform(s, 0, 0, s, 0, 0);
       ctx.globalAlpha = 1;
       ctx.clearRect(0, 0, w, h);
+
+      // While the wall photo is being calibrated the projector shows only the test pattern.
+      if (calibrationPattern) {
+          drawCalibrationPattern(ctx, w, h);
+          return;
+      }
 
       // Render layers
       drawLayers({ ctx, layers, size: { w, h }, scale: s, now, gridDefaults, fx, textures, staticPatterns });
@@ -742,11 +758,20 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
                     height: containerSize.h
                 }}
             >
-                <img 
-                src={backgroundUrl} 
-                className="w-full h-full object-contain opacity-50 select-none pointer-events-none"
-                alt="reference surface"
-                />
+                {backgroundCalibration ? (
+                    <CalibratedPhoto
+                        url={backgroundUrl}
+                        calibration={backgroundCalibration}
+                        projectorSize={containerSize}
+                        className="w-full h-full opacity-50 select-none pointer-events-none"
+                    />
+                ) : (
+                    <img 
+                    src={backgroundUrl} 
+                    className="w-full h-full object-contain opacity-50 select-none pointer-events-none"
+                    alt="reference surface"
+                    />
+                )}
             </div>
         )}
       </div>

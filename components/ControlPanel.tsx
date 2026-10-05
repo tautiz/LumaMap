@@ -14,7 +14,7 @@ import {
   Upload, Monitor, Square, Layers, Sparkles, Move, Play, Image as ImageIcon, Save, FolderOpen, ExternalLink,
   Eye, EyeOff, Move3d, Plus, Trash2, ChevronUp, ChevronDown, Lock, Unlock, Settings, Copy, Keyboard,
   HelpCircle, Lightbulb, ArrowRight, Maximize, MousePointer2, ChevronRight, Download, Power, Link,
-  Film, SkipBack, SkipForward, Repeat, Frame, Palette, SlidersHorizontal, Blend, SquareDashed, RotateCw
+  Film, SkipBack, SkipForward, Repeat, Frame, Palette, SlidersHorizontal, Blend, SquareDashed, RotateCw, Crosshair, CheckCircle2
 } from 'lucide-react';
 
 // Loaded only when someone exports, so the projector page stays small.
@@ -92,6 +92,9 @@ interface ControlPanelProps {
 
   backgroundTransform: Transform;
   setBackgroundTransform: (t: Transform) => void;
+  isPhotoCalibrated: boolean;
+  onCalibratePhoto: () => void;
+  onClearCalibration: () => void;
 
   projectorSize: { w: number, h: number };
   setProjectorSize: (size: { w: number, h: number }) => void;
@@ -168,6 +171,9 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   setIsEditingBackground,
   backgroundTransform,
   setBackgroundTransform,
+  isPhotoCalibrated,
+  onCalibratePhoto,
+  onClearCalibration,
   projectorSize,
   setProjectorSize,
   keyMappings,
@@ -354,6 +360,31 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                 </>
               )}
             </label>
+
+            {backgroundUrl && (isPhotoCalibrated ? (
+              <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/30 p-2.5 space-y-2">
+                <p className="flex items-center gap-2 text-sm text-emerald-200"><CheckCircle2 size={16} /> {t('setup.photo.calibrated')}</p>
+                <div className="flex gap-2">
+                  <button onClick={onCalibratePhoto} className="flex-1 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-xs text-slate-200">{t('setup.photo.recalibrate')}</button>
+                  <button onClick={onClearCalibration} className="flex-1 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-xs text-slate-300">{t('setup.photo.uncalibrate')}</button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <button
+                  onClick={onCalibratePhoto}
+                  className="w-full py-2.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-900 text-sm font-bold flex items-center justify-center gap-2"
+                >
+                  <Crosshair size={16} /> {t('setup.photo.calibrate')}
+                </button>
+                <p className="text-xs text-slate-400">{t('setup.photo.calibrateHint')}</p>
+              </div>
+            ))}
+            {!backgroundUrl && (
+              <button onClick={onCalibratePhoto} className="w-full py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm text-slate-200 flex items-center justify-center gap-2">
+                <Crosshair size={16} /> {t('setup.photo.calibrateStart')}
+              </button>
+            )}
 
             {backgroundUrl && (
               <div className="grid grid-cols-2 gap-2">
