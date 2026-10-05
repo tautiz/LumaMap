@@ -30,6 +30,20 @@ content, sit on top of it or behind it, mix by blend mode, follow the element's 
 once on a signal (key T, `LumaAPI.triggerEffects()`). Stacks can be saved as sets. The content is never changed.
 Guide and architecture (Lithuanian): [docs/efektai.md](docs/efektai.md).
 
+## Looping video export
+
+Step 3 ("Show") → **Export looping video** saves what the projector shows as an MP4 that plays on repeat with
+no jump. Every video plays whole rounds only: the length is the least common multiple of the videos' lengths,
+worked out in exact whole numbers from each file's own timestamps (23.976, 29.97 and 59.94 fps stay exact).
+Moving effects are fitted to the loop; effects that cannot loop are listed first, and the export can go ahead
+anyway. Guide and time model (Lithuanian): [docs/video-eksportas.md](docs/video-eksportas.md).
+
+## Tests
+
+`npm test` runs the unit tests (loop timing, effects in a loop, the export dialog's steps).
+`npm run test:e2e` exports real videos in Chromium and checks the files with ffmpeg; it needs `ffmpeg`/`ffprobe`
+with libvpx and Playwright's Chromium (set `CHROMIUM_PATH` to use another Chromium).
+
 ## Run Locally
 
 **Prerequisites:**  Node.js

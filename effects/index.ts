@@ -6,6 +6,7 @@ export * from './graph';
 export * from './pipeline';
 export * from './presets';
 export * from './content';
+export * from './loop';
 
 import { Layer } from '../types';
 

@@ -2,7 +2,7 @@ import { ControlPoint, Layer } from '../types';
 import { GraphNode, RenderGraph, ScreenPass } from './graph';
 import { COMPOSITE, makesLayer, resolveParams } from './registry';
 import { EffectInstance, TextureFxArgs } from './types';
-import { convexHull, hashString, mixColor, rgbToHex } from './util';
+import { convexHull, fitRate, hashString, mixColor, rgbToHex } from './util';
 
 // Runs an element's render graph and returns its finished picture, which the canvas then maps onto the
 // element's mesh like any other texture. Effects draw at about the size the element appears on screen,
@@ -16,7 +16,7 @@ export type ContentDraw =
   | { kind: 'none' };
 
 const MAX_TEXTURE = 1024;
-const DEFAULT_PALETTE = ['#ff2d55', '#ffcc00', '#00ff88', '#00e5ff', '#b46bff'];
+export const DEFAULT_PALETTE = ['#ff2d55', '#ffcc00', '#00ff88', '#00e5ff', '#b46bff'];
 
 /** The shared clock, in seconds: Date.now() is the same in the editor and the projector window on one device. */
 export const fxTime = (now: number) => (now % 86_400_000) / 1000;
@@ -130,7 +130,17 @@ export interface FrameEnv {
   area: { w: number; h: number };
   layers: Layer[];
   elementColor: string;
+  // Looping video export: effects fit their speeds to a loop this long (seconds), except the ones in
+  // `skip`, which cannot loop and are drawn as they are (the user was warned about them).
+  loop?: { seconds: number; skip?: Set<string> } | null;
 }
+
+/** The loop length an effect should fit itself to, or null when it plays freely. */
+export const loopFor = (fx: EffectInstance, env: FrameEnv): number | null =>
+  env.loop && !env.loop.skip?.has(fx.id) ? env.loop.seconds : null;
+
+/** The palette colour source moves through all its colours every PALETTE_SECONDS x colours. */
+export const PALETTE_SECONDS = 2;
 
 export class EffectsEngine {
   private states = new Map<string, LayerState>();
@@ -153,7 +163,7 @@ export class EffectsEngine {
       case 'element': return env.elementColor;
       case 'palette': {
         const list = c.palette?.length ? c.palette : DEFAULT_PALETTE;
-        const t = fxTime(env.now) / 2;
+        const t = fxTime(env.now) * fitRate(1 / (PALETTE_SECONDS * list.length), loopFor(fx, env)) * list.length;
         const i = Math.floor(t);
         return mixColor(list[i % list.length], list[(i + 1) % list.length], t - i);
       }
@@ -240,6 +250,7 @@ export class EffectsEngine {
       color: this.resolveColor(fx, st, env, input?.canvas ?? null),
       colorMode: fx.color.mode,
       seed: hashString(fx.id),
+      loop: loopFor(fx, env),
       scratch: st.scratchCtx,
     };
     try {
@@ -331,6 +342,7 @@ export class EffectsEngine {
           color: this.resolveColor(fx, st, env, null),
           colorMode: fx.color.mode,
           seed: hashString(fx.id),
+          loop: loopFor(fx, env),
         });
       } catch (e) {
         console.warn(`Effect ${fx.type} failed`, e);

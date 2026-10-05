@@ -1,6 +1,6 @@
 import { registerEffect } from '../registry';
 import { ParamDef, ScreenFxArgs } from '../types';
-import { boltPath, glowStroke, num, str } from '../util';
+import { TAU, boltPath, fitAngular, fitRate, glowStroke, num, str } from '../util';
 
 // Effects drawn in the projector's space rather than inside the element: they can reach past its edges,
 // or run between two elements. Sizes are in projector pixels; shadow blur is in device pixels, hence `scale`.
@@ -15,8 +15,9 @@ registerEffect({
     { key: 'pulse', type: 'number', min: 0, max: 3, step: 0.05, default: 0.5 },
     { key: 'inside', type: 'bool', default: false },
   ],
+  loop: { kind: 'loop', rates: p => [num(p, 'pulse', 0.5)] },
   defaults: { color: { mode: 'element' } },
-  renderScreen: ({ ctx, scale, outline, area, time, progress, params, intensity, color }) => {
+  renderScreen: ({ ctx, scale, outline, area, time, progress, params, intensity, color, loop }) => {
     if (outline.length < 3) return;
     const margin = Math.min(area.w, area.h) * 0.05 * num(params, 'size', 1);
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -56,7 +57,7 @@ registerEffect({
     }
 
     const pulse = num(params, 'pulse', 0.5);
-    const breath = progress !== null ? Math.sin(Math.PI * progress) : pulse > 0 ? 0.65 + 0.35 * Math.sin(time * pulse * Math.PI * 2) : 1;
+    const breath = progress !== null ? Math.sin(Math.PI * progress) : pulse > 0 ? 0.65 + 0.35 * Math.sin(time * fitRate(pulse, loop) * Math.PI * 2) : 1;
     ctx.globalAlpha *= (0.4 + 0.6 * intensity) * breath;
     ctx.drawImage(auraCanvas, minX, minY, maxX - minX, maxY - minY);
   },
@@ -75,6 +76,8 @@ const endpoints = ({ center, centerOf, area, params }: ScreenFxArgs) => {
   return { from: center, to };
 };
 
+const LASER_FLICKER_W = 47; // Radians per second
+
 registerEffect({
   id: 'laser', role: 'spatial', inputMode: 'none', space: 'screen', animated: true,
   params: [
@@ -82,12 +85,13 @@ registerEffect({
     { key: 'width', type: 'number', min: 0.2, max: 5, step: 0.1, default: 1 },
     { key: 'flicker', type: 'number', min: 0, max: 1, step: 0.05, default: 0.3 },
   ],
+  loop: { kind: 'loop', rates: p => (num(p, 'flicker', 0.3) > 0 ? [LASER_FLICKER_W / TAU] : []) },
   defaults: { blend: 'add', color: { mode: 'custom', color: '#ff2d55' } },
   renderScreen: (a) => {
-    const { ctx, scale, area, time, progress, params, intensity, color } = a;
+    const { ctx, scale, area, time, progress, params, intensity, color, loop } = a;
     const { from, to } = endpoints(a);
     const m = Math.min(area.w, area.h);
-    const flick = 1 - num(params, 'flicker', 0.3) * (0.5 + 0.5 * Math.sin(time * 47)) * 0.6;
+    const flick = 1 - num(params, 'flicker', 0.3) * (0.5 + 0.5 * Math.sin(time * fitAngular(LASER_FLICKER_W, loop))) * 0.6;
     // As a signal the beam shoots out to the target, then fades.
     const reach = progress !== null ? Math.min(1, progress * 4) : 1;
     const end = { x: from.x + (to.x - from.x) * reach, y: from.y + (to.y - from.y) * reach };
@@ -104,12 +108,13 @@ registerEffect({
     { key: 'roughness', type: 'number', min: 0.1, max: 1.5, step: 0.05, default: 0.6 },
     { key: 'thickness', type: 'number', min: 0.2, max: 4, step: 0.1, default: 1 },
   ],
+  loop: { kind: 'random', rates: p => [num(p, 'flicker', 12)] },
   defaults: { blend: 'add', color: { mode: 'custom', color: '#9fd8ff' } },
   renderScreen: (a) => {
-    const { ctx, scale, area, time, progress, params, intensity, color, seed } = a;
+    const { ctx, scale, area, time, progress, params, intensity, color, seed, loop } = a;
     const { from, to } = endpoints(a);
     const m = Math.min(area.w, area.h);
-    const bucket = Math.floor(time * num(params, 'flicker', 12));
+    const bucket = Math.floor(time * fitRate(num(params, 'flicker', 12), loop));
     const alpha = (progress !== null ? 1 - progress : 1) * (0.5 + 0.5 * intensity);
     for (let i = 0; i < 2; i++) {
       const pts = boltPath(from.x, from.y, to.x, to.y, seed + bucket * 7919 + i * 13, num(params, 'roughness', 0.6), 7);

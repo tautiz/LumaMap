@@ -4,6 +4,7 @@ import { generateTexture } from '../services/gemini';
 import { TranslationKey, formatKey, useI18n } from '../i18n';
 import LanguageSwitcher from './LanguageSwitcher';
 import MediaLibraryDialog from './MediaLibraryDialog';
+
 import GridSettingsPanel, { ColorPicker } from './GridSettingsPanel';
 import Collapsible from './Collapsible';
 import EffectStackPanel from './EffectStackPanel';
@@ -15,6 +16,9 @@ import {
   HelpCircle, Lightbulb, ArrowRight, Maximize, MousePointer2, ChevronRight, Download, Power, Link,
   Film, SkipBack, SkipForward, Repeat, Frame, Palette, SlidersHorizontal, Blend, SquareDashed, RotateCw
 } from 'lucide-react';
+
+// Loaded only when someone exports, so the projector page stays small.
+const ExportVideoDialog = React.lazy(() => import('./ExportVideoDialog'));
 
 // Exact rotation of the element in degrees: a slider for rough turning and a number field for exact values.
 const RotationField: React.FC<{ value: number; disabled?: boolean; onChange: (deg: number) => void }> = ({ value, disabled, onChange }) => {
@@ -178,6 +182,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   const [isGenerating, setIsGenerating] = useState(false);
   const [recordingAction, setRecordingAction] = useState<ShortcutAction | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
 
   const activeLayer = layers.find(l => l.id === activeLayerId);
 
@@ -261,6 +266,18 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
           onClose={() => setLibraryOpen(false)}
           onPick={(sources, loop) => onUpdateLayer(activeLayer.id, playVideos(activeLayer, sources, loop))}
         />
+      )}
+      {exportOpen && (
+        <React.Suspense fallback={null}>
+        <ExportVideoDialog
+          layers={layers}
+          gridDefaults={gridDefaults}
+          projectorSize={projectorSize}
+          onUpdateLayer={onUpdateLayer}
+          onShowLayer={(id) => { onSelectLayer(id); setMode(AppMode.MAPPING); }}
+          onClose={() => setExportOpen(false)}
+        />
+        </React.Suspense>
       )}
       {/* HEADER */}
       <div className="p-5 pb-4 space-y-4 border-b border-slate-800">
@@ -735,6 +752,10 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
           >
             <Frame size={18} /> {showProjectorFrame ? t('live.frame.hide') : t('live.frame.show')}
             <span className="text-xs font-mono opacity-70">({formatKey(keyMappings.TOGGLE_FRAME, t)})</span>
+          </button>
+
+          <button onClick={() => setExportOpen(true)} className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-slate-800 border border-emerald-600/60 text-emerald-200 font-semibold hover:bg-slate-700 transition-colors">
+            <Film size={18} /> {t('export.button')}
           </button>
 
           <Collapsible title={t('show.title')} icon={Power}>
