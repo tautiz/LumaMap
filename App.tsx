@@ -6,7 +6,7 @@ import HelpDialog from './components/HelpDialog';
 import CalibrationDialog from './components/CalibrationDialog';
 import { useI18n } from './i18n';
 import { HelpCircle, Monitor, Move, Play, SlidersHorizontal } from 'lucide-react';
-import { AppMode, Layer, ControlPoint, ProjectionSource, ContentType, Transform, KeyMap, ShortcutAction, GridSettings, PhotoCalibration } from './types';
+import { AppMode, Layer, ControlPoint, ProjectionSource, ContentType, Transform, KeyMap, ShortcutAction, GridSettings, PhotoCalibration, CalibrationView } from './types';
 import { DEFAULT_GRID, gridAspect, isPlainRectangle, proportionalPoints } from './utils/grid';
 import { playlistStep } from './services/mediaLibrary';
 import { fireSignals, newId } from './effects';
@@ -71,6 +71,9 @@ const App: React.FC = () => {
   const [backgroundCalibration, setBackgroundCalibration] = useState<PhotoCalibration | null>(null);
   // The calibration dialog is open; meanwhile the projector shows the test pattern. Not saved.
   const [calibrating, setCalibrating] = useState(false);
+  // What the projector shows meanwhile: the pattern, or white and black while the phone takes its pictures.
+  const [calibrationView, setCalibrationView] = useState<CalibrationView>('pattern');
+  const projectorCalibrationView = calibrating ? calibrationView : null;
   const calibratingRef = useRef(false);
   calibratingRef.current = calibrating;
 
@@ -271,7 +274,7 @@ const App: React.FC = () => {
       bgTransform: backgroundTransform,
       showBg: showBackgroundInLive,
       bgCalibration: backgroundCalibration,
-      calibrationPattern: calibrating,
+      calibrationPattern: projectorCalibrationView,
       projSize: projectorSize,
       gridDefaults,
       projectorFrame: showProjectorFrame
@@ -318,6 +321,7 @@ const App: React.FC = () => {
             setShowProjectorFrame(!!projectorFrame);
             setBackgroundCalibration(bgCalibration ?? null);
             setCalibrating(!!calibrationPattern);
+            setCalibrationView(calibrationPattern === 'white' || calibrationPattern === 'black' ? calibrationPattern : 'pattern');
 
             const usedIds = new Set<string>();
             if (bgId) usedIds.add(bgId);
@@ -391,7 +395,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
       scheduleSync();
-  }, [layers, scheduleSync, backgroundUrl, backgroundFile, backgroundTransform, showBackgroundInLive, backgroundCalibration, calibrating, projectorSize, gridDefaults, showProjectorFrame]);
+  }, [layers, scheduleSync, backgroundUrl, backgroundFile, backgroundTransform, showBackgroundInLive, backgroundCalibration, calibrating, calibrationView, projectorSize, gridDefaults, showProjectorFrame]);
 
   // Control window: report where its videos are, once a second.
   useEffect(() => {
@@ -716,6 +720,7 @@ const App: React.FC = () => {
     setBackgroundTransform({ x: 0, y: 0, k: 1 });
     setIsEditingBackground(false);
     setCalibrating(false);
+    setCalibrationView('pattern');
   };
 
   const handleOpenLive = async () => {
@@ -924,7 +929,7 @@ const App: React.FC = () => {
           gridDefaults={gridDefaults}
           showProjectorFrame={showProjectorFrame}
           backgroundCalibration={backgroundCalibration}
-          calibrationPattern={calibrating}
+          calibrationPattern={projectorCalibrationView}
         />
         
         {!isReceiver && mode === AppMode.SETUP && !backgroundUrl && !welcomeDismissed && (
@@ -1004,7 +1009,9 @@ const App: React.FC = () => {
           onUploadPhoto={handleUploadBackground}
           onOpenLive={handleOpenLive}
           onApply={handleApplyCalibration}
-          onClose={() => setCalibrating(false)}
+          onClose={() => { setCalibrating(false); setCalibrationView('pattern'); }}
+          projectorView={calibrationView}
+          onProjectorView={setCalibrationView}
         />
       )}
 

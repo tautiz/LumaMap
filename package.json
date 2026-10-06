@@ -10,13 +10,16 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "node tests/e2e/export.e2e.mjs",
-    "test:e2e:calibration": "node tests/e2e/calibration.e2e.mjs"
+    "test:e2e:calibration": "node tests/e2e/calibration.e2e.mjs",
+    "test:e2e:phone": "node tests/e2e/phone-calibration.e2e.mjs"
   },
   "dependencies": {
     "@google/genai": "^1.30.0",
     "delaunator": "^5.1.0",
     "lucide-react": "^0.555.0",
     "mediabunny": "^1.61.3",
+    "peerjs": "^1.5.5",
+    "qrcode": "^1.5.4",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-draggable": "^4.5.0"
@@ -24,10 +27,12 @@
   "devDependencies": {
     "@types/delaunator": "^5.0.3",
     "@types/node": "^22.14.0",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^5.0.0",
     "autoprefixer": "^10.6.1",
+    "peer": "^1.0.2",
     "playwright-core": "^1.56.1",
     "postcss": "^8.5.28",
     "tailwindcss": "^3.4.19",

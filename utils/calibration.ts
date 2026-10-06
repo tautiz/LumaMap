@@ -1,4 +1,4 @@
-import { PhotoCalibration, Point } from '../types';
+import { CalibrationView, PhotoCalibration, Point } from '../types';
 
 // Wall photo calibration.
 //
@@ -229,6 +229,18 @@ export const drawCalibrationPattern = (ctx: CanvasRenderingContext2D, w: number,
   ctx.moveTo(w / 2 - arm / 2, h / 2); ctx.lineTo(w / 2 + arm / 2, h / 2);
   ctx.moveTo(w / 2, h / 2 - arm / 2); ctx.lineTo(w / 2, h / 2 + arm / 2);
   ctx.stroke();
+  ctx.restore();
+};
+
+/** What the projector shows during calibration. */
+export const drawCalibrationView = (ctx: CanvasRenderingContext2D, w: number, h: number, view: CalibrationView) => {
+  if (view === 'pattern') {
+    drawCalibrationPattern(ctx, w, h);
+    return;
+  }
+  ctx.save();
+  ctx.fillStyle = view === 'white' ? '#ffffff' : '#000000';
+  ctx.fillRect(0, 0, w, h);
   ctx.restore();
 };
 

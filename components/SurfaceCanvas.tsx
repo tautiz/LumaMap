@@ -1,6 +1,6 @@
 
 import React, { useRef, useEffect, useState } from 'react';
-import { ControlPoint, ContentType, AppMode, Transform, Layer, GridSettings, PhotoCalibration } from '../types';
+import { ControlPoint, ContentType, AppMode, Transform, Layer, GridSettings, PhotoCalibration, CalibrationView } from '../types';
 import { DEFAULT_GRID, drawGridTexture, gridKey } from '../utils/grid';
 import { triangulate, getBarycentric, pointInTriangle, pointsCentre, rotatePoints, rotationUpdate, normalizeAngle } from '../utils/math';
 import Draggable from 'react-draggable';
@@ -8,7 +8,7 @@ import { useI18n } from '../i18n';
 import { videoLoops } from '../services/mediaLibrary';
 import { EffectsEngine, drawGradientTexture, gradientKey, layerNeedsFrames } from '../effects';
 import { SceneTextures, drawLayers } from '../utils/scene';
-import { drawCalibrationPattern } from '../utils/calibration';
+import { drawCalibrationView } from '../utils/calibration';
 import CalibratedPhoto from './CalibratedPhoto';
 import { ZoomIn, ZoomOut, RefreshCw, Play, Pause, Volume2, VolumeX, RotateCw } from 'lucide-react';
 
@@ -47,8 +47,8 @@ interface SurfaceCanvasProps {
   // How the wall photo lines up with the projector picture; without it the photo is just fitted in.
   backgroundCalibration?: PhotoCalibration | null;
 
-  // Show the calibration test pattern instead of the elements (while the wall photo is being calibrated).
-  calibrationPattern?: boolean;
+  // While the wall photo is being calibrated: what to show instead of the elements.
+  calibrationPattern?: CalibrationView | null;
 }
 
 const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
@@ -68,7 +68,7 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
   gridDefaults = DEFAULT_GRID,
   showProjectorFrame = false,
   backgroundCalibration = null,
-  calibrationPattern = false
+  calibrationPattern = null
 }) => {
   const { t } = useI18n();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -317,9 +317,9 @@ const SurfaceCanvas: React.FC<SurfaceCanvasProps> = ({
       ctx.globalAlpha = 1;
       ctx.clearRect(0, 0, w, h);
 
-      // While the wall photo is being calibrated the projector shows only the test pattern.
+      // While the wall photo is being calibrated the projector shows only the test pattern (or plain white or black).
       if (calibrationPattern) {
-          drawCalibrationPattern(ctx, w, h);
+          drawCalibrationView(ctx, w, h, calibrationPattern);
           return;
       }
 

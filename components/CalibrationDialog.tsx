@@ -1,9 +1,12 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Check, ChevronLeft, ExternalLink, Maximize, Upload, X, Crosshair } from 'lucide-react';
-import { PhotoCalibration, Point } from '../types';
+import { CalibrationView, PhotoCalibration, Point } from '../types';
 import { useI18n } from '../i18n';
 import CalibratedPhoto from './CalibratedPhoto';
-import { CORNER_COLORS, cornersUsable, defaultCorners, drawCalibrationPattern } from '../utils/calibration';
+import { CORNER_COLORS, cornersUsable, defaultCorners, drawCalibrationPattern, drawCalibrationView } from '../utils/calibration';
+import PhoneCalibrationPanel, { PhoneResult } from './PhoneCalibrationPanel';
+import { DetectResult } from '../utils/autoCalibrate';
 
 // Step by step: the projector shows a test pattern, the wall is photographed with it,
 // the pattern's four corners are marked on the photo, and the result is checked against the pattern.
@@ -13,7 +16,7 @@ type Step = 'pattern' | 'corners' | 'check';
 const LOUPE = 170; // Magnifier size, px
 const LOUPE_ZOOM = 4;
 
-const PatternCanvas: React.FC<{ w: number; h: number; linesOnly?: boolean; className?: string }> = ({ w, h, linesOnly, className }) => {
+const PatternCanvas: React.FC<{ w: number; h: number; linesOnly?: boolean; view?: CalibrationView; className?: string }> = ({ w, h, linesOnly, view = 'pattern', className }) => {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const canvas = ref.current;
@@ -24,8 +27,9 @@ const PatternCanvas: React.FC<{ w: number; h: number; linesOnly?: boolean; class
     const ctx = canvas.getContext('2d')!;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.scale(s, s);
-    drawCalibrationPattern(ctx, w, h, linesOnly);
-  }, [w, h, linesOnly]);
+    if (linesOnly) drawCalibrationPattern(ctx, w, h, true);
+    else drawCalibrationView(ctx, w, h, view);
+  }, [w, h, linesOnly, view]);
   return <canvas ref={ref} className={className} />;
 };
 
@@ -37,7 +41,9 @@ const CalibrationDialog: React.FC<{
   onOpenLive: () => void;
   onApply: (calibration: PhotoCalibration) => void;
   onClose: () => void;
-}> = ({ photoUrl, calibration, projectorSize, onUploadPhoto, onOpenLive, onApply, onClose }) => {
+  projectorView: CalibrationView; // What the projector shows now
+  onProjectorView: (view: CalibrationView) => void;
+}> = ({ photoUrl, calibration, projectorSize, onUploadPhoto, onOpenLive, onApply, onClose, projectorView, onProjectorView }) => {
   const { t } = useI18n();
   const [step, setStep] = useState<Step>('pattern');
   const [fullPattern, setFullPattern] = useState(false);
@@ -49,16 +55,45 @@ const CalibrationDialog: React.FC<{
   const areaRef = useRef<HTMLDivElement>(null);
   const [area, setArea] = useState({ w: 0, h: 0 });
   const uploadedRef = useRef(false);
+  // Corners found on the phone's photos, waiting for that photo to arrive as the wall photo.
+  const foundRef = useRef<DetectResult | null>(null);
+  // The phone panel lives in its own element, moved into its place on the first step and kept aside
+  // (hidden) on the others, so it is never remounted and the phone stays connected.
+  const phoneSlotRef = useRef<HTMLDivElement>(null);
+  const [phoneHome] = useState(() => document.createElement('div'));
+  useLayoutEffect(() => {
+    const slot = phoneSlotRef.current;
+    if (slot) slot.appendChild(phoneHome);
+    else phoneHome.remove();
+  }, [step, phoneHome]);
+  const [autoNote, setAutoNote] = useState<DetectResult | null>(null);
+  // The phone's picture lit by the projector: corners are marked and checked on it, because the kept
+  // wall photo (taken with the projector dark) does not show where the light ends. Same size as the photo.
+  const [litUrl, setLitUrl] = useState<string | null>(null);
+  useEffect(() => () => { if (litUrl) URL.revokeObjectURL(litUrl); }, [litUrl]);
+  const markUrl = litUrl ?? photoUrl;
 
-  // A new photo starts from fresh corners.
+  // A new photo starts from fresh corners, or from the ones found on it.
   useEffect(() => {
     if (uploadedRef.current) {
       uploadedRef.current = false;
-      setCorners(null);
-      setLens(0);
+      const found = foundRef.current;
+      foundRef.current = null;
+      setCorners(found?.ok ? found.calibration.corners : null);
+      setLens(found?.ok ? found.calibration.lens : 0);
     }
     setNatural(null);
-  }, [photoUrl]);
+  }, [markUrl]);
+
+  const onPhoneResult = useCallback((result: PhoneResult) => {
+    foundRef.current = result.detection;
+    uploadedRef.current = true;
+    setAutoNote(result.detection);
+    setLitUrl(URL.createObjectURL(result.lit));
+    setFullPattern(false);
+    onUploadPhoto(result.photo);
+    setStep('corners');
+  }, [onUploadPhoto]);
 
   useLayoutEffect(() => {
     const el = areaRef.current;
@@ -136,21 +171,27 @@ const CalibrationDialog: React.FC<{
     </span>
   );
 
-  if (fullPattern) {
-    // This screen is the projector: show only the pattern, as large as the projector picture would be.
-    return (
-      <div
-        className="fixed inset-0 z-[400] bg-black flex items-center justify-center cursor-pointer"
-        onClick={() => { setFullPattern(false); if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); }}
-      >
-        <PatternCanvas w={projectorSize.w} h={projectorSize.h} className="max-w-full max-h-full" />
-      </div>
-    );
-  }
+  // This screen is the projector: show only the pattern (or white, black for the phone), as large as the
+  // projector picture would be. The dialog stays open underneath, so the phone link keeps going.
+  const phonePanel = (
+    <PhoneCalibrationPanel onView={onProjectorView} onResult={onPhoneResult} />
+  );
+
+  const fullScreenPattern = fullPattern && (
+    <div
+      className="fixed inset-0 z-[400] bg-black flex items-center justify-center cursor-pointer"
+      onClick={() => { setFullPattern(false); if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); }}
+    >
+      <PatternCanvas w={projectorSize.w} h={projectorSize.h} view={projectorView} className="max-w-full max-h-full" />
+    </div>
+  );
 
   const active2 = corners?.[active];
 
   return (
+    <>
+    {fullScreenPattern}
+    {createPortal(phonePanel, phoneHome)}
     <div className="fixed inset-0 z-[300] bg-black/80 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={t('calib.title')}>
       <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-5xl h-[92vh] flex flex-col text-white">
         <header className="flex items-center gap-4 px-5 py-3 border-b border-slate-800">
@@ -168,6 +209,8 @@ const CalibrationDialog: React.FC<{
           <div className="flex-1 overflow-y-auto p-5 grid md:grid-cols-2 gap-6">
             <div className="space-y-4">
               <p className="text-slate-200 leading-relaxed">{t('calib.pattern.why')}</p>
+              <div ref={phoneSlotRef} />
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t('calib.pattern.manual')}</p>
               <ol className="space-y-3 text-sm text-slate-200">
                 <li className="flex gap-3"><b className="text-cyan-400">1.</b><span>{t('calib.pattern.s1')}</span></li>
                 <li className="flex gap-3"><b className="text-cyan-400">2.</b><span>{t('calib.pattern.s2')}</span></li>
@@ -196,6 +239,8 @@ const CalibrationDialog: React.FC<{
                     e.target.value = '';
                     if (!file) return;
                     uploadedRef.current = true;
+                    setAutoNote(null);
+                    setLitUrl(null);
                     onUploadPhoto(file);
                     setStep('corners');
                   }}
@@ -213,7 +258,14 @@ const CalibrationDialog: React.FC<{
         {step === 'corners' && (
           <>
             <div className="px-5 py-3 text-sm text-slate-200 flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-slate-800">
-              <span className="flex-1 min-w-[16rem]">{t('calib.corners.hint')}</span>
+              <span className="flex-1 min-w-[16rem]">
+                {autoNote && (
+                  <b className={`block mb-1 ${autoNote.ok ? 'text-emerald-300' : 'text-amber-300'}`} role="status">
+                    {t(autoNote.ok === false ? (`calib.auto.${autoNote.reason}` as const) : 'calib.auto.found')}
+                  </b>
+                )}
+                {t('calib.corners.hint')}
+              </span>
               <span className="flex gap-1.5">
                 {cornerNames.map((name, i) => (
                   <button
@@ -243,9 +295,9 @@ const CalibrationDialog: React.FC<{
                 setDragging(true);
               }}
             >
-              {photoUrl && (
+              {markUrl && (
                 <img
-                  src={photoUrl} alt="" draggable={false} onLoad={onPhotoLoaded}
+                  src={markUrl} alt="" draggable={false} onLoad={onPhotoLoaded}
                   className="absolute max-w-none pointer-events-none"
                   style={fit && natural
                     ? { left: fit.x, top: fit.y, width: natural.w * fit.scale, height: natural.h * fit.scale }
@@ -274,7 +326,7 @@ const CalibrationDialog: React.FC<{
                 </svg>
               )}
               {/* Magnifier around the chosen corner, in the corner of the view away from it. */}
-              {fit && natural && active2 && photoUrl && (() => {
+              {fit && natural && active2 && markUrl && (() => {
                 const ax = fit.x + active2.x * fit.scale, ay = fit.y + active2.y * fit.scale;
                 const left = ax < area.w / 2 ? area.w - LOUPE - 12 : 12;
                 const z = fit.scale * LOUPE_ZOOM;
@@ -283,7 +335,7 @@ const CalibrationDialog: React.FC<{
                     className="absolute top-3 rounded-full border-4 shadow-2xl pointer-events-none bg-black"
                     style={{
                       left, width: LOUPE, height: LOUPE, borderColor: CORNER_COLORS[active],
-                      backgroundImage: `url(${photoUrl})`, backgroundRepeat: 'no-repeat',
+                      backgroundImage: `url(${markUrl})`, backgroundRepeat: 'no-repeat',
                       backgroundSize: `${natural.w * z}px ${natural.h * z}px`,
                       backgroundPosition: `${LOUPE / 2 - 4 - active2.x * z}px ${LOUPE / 2 - 4 - active2.y * z}px`,
                     }}
@@ -305,7 +357,7 @@ const CalibrationDialog: React.FC<{
           </>
         )}
 
-        {step === 'check' && corners && photoUrl && (
+        {step === 'check' && corners && markUrl && (
           <>
             <div className="px-5 py-3 text-sm text-slate-200 border-b border-slate-800">{t('calib.check.hint')}</div>
             <div ref={areaRef} className="relative flex-1 overflow-hidden bg-black flex items-center justify-center p-3">
@@ -314,7 +366,7 @@ const CalibrationDialog: React.FC<{
                 const style = { width: projectorSize.w * scale, height: projectorSize.h * scale };
                 return (
                   <div className="relative ring-1 ring-white/20" style={style}>
-                    <CalibratedPhoto url={photoUrl} calibration={{ corners, lens }} projectorSize={projectorSize} maxSide={1200} className="absolute inset-0 w-full h-full" />
+                    <CalibratedPhoto url={markUrl} calibration={{ corners, lens }} projectorSize={projectorSize} maxSide={1200} className="absolute inset-0 w-full h-full" />
                     <PatternCanvas w={projectorSize.w} h={projectorSize.h} linesOnly className="absolute inset-0 w-full h-full pointer-events-none" />
                   </div>
                 );
@@ -344,6 +396,7 @@ const CalibrationDialog: React.FC<{
         )}
       </div>
     </div>
+    </>
   );
 };
 
