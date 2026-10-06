@@ -9,11 +9,22 @@ if (!rootElement) {
   throw new Error("Could not find root element to mount to");
 }
 
+// ?camera=<id>: the phone camera page for calibrating the wall photo (opened from a QR code). Loaded
+// separately, so the phone does not load the whole editor.
+const CameraPage = React.lazy(() => import('./components/CameraPage'));
+const cameraId = new URLSearchParams(window.location.search).get('camera');
+
 const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
     <LanguageProvider>
-      <App />
+      {cameraId ? (
+        <React.Suspense fallback={null}>
+          <CameraPage computerId={cameraId} />
+        </React.Suspense>
+      ) : (
+        <App />
+      )}
     </LanguageProvider>
   </React.StrictMode>
 );

@@ -94,6 +94,10 @@ export interface PhotoCalibration {
   lens: number; // Lens bend correction, 0 = none (about -0.3…0.3)
 }
 
+// What the projector shows while the wall photo is calibrated: the test pattern, or plain white or
+// black for the phone camera to find the picture by (utils/autoCalibrate.ts).
+export type CalibrationView = 'pattern' | 'white' | 'black';
+
 export interface ProjectorState {
   layers: Layer[];
   activeLayerId: string | null;
